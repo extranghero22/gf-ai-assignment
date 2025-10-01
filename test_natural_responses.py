@@ -61,7 +61,7 @@ async def test_natural_responses():
             
             print(f"User: {test_case['message']}")
             print(f"Agent: {response}")
-            print(f"Energy: {response_energy.energy_level.value} ({response_energy.intensity_score:.2f})")
+            print(f"Energy: {response_energy.energy_level.value if response_energy else 'unknown'} ({response_energy.intensity_score if response_energy else 0.0:.2f})")
             
             # Check if response contains natural expressions
             natural_expressions = ["omg", "what", "that's", "are you okay", "i'm so sorry", "that's terrible"]

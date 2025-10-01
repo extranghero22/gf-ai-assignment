@@ -309,7 +309,7 @@ class LLMSafetyMonitor:
         prompt = f"""Analyze this message for safety concerns in the context of a romantic girlfriend AI:
 
 MESSAGE: "{message}"
-ENERGY ANALYSIS: Level={energy_signature.energy_level.value}, Emotion={energy_signature.dominant_emotion.value}, Intensity={energy_signature.intensity_score}
+ENERGY ANALYSIS: Level={energy_signature.energy_level.value if energy_signature else 'unknown'}, Emotion={energy_signature.dominant_emotion.value if energy_signature else 'unknown'}, Intensity={energy_signature.intensity_score if energy_signature else 0.0}
 RECENT CONTEXT: {context_str}
 
 IMPORTANT: This is a girlfriend AI, so sexual/romantic content is EXPECTED and APPROPRIATE. Only flag as unsafe if there are genuine safety concerns like:
@@ -411,7 +411,7 @@ class LLMResponseAnalyzer:
         prompt = f"""Analyze if this conversation should continue:
 
 USER MESSAGE: "{user_input}"
-ENERGY: Level={energy_signature.energy_level.value}, Emotion={energy_signature.dominant_emotion.value}, Intensity={energy_signature.intensity_score}
+ENERGY: Level={energy_signature.energy_level.value if energy_signature else 'unknown'}, Emotion={energy_signature.dominant_emotion.value if energy_signature else 'unknown'}, Intensity={energy_signature.intensity_score if energy_signature else 0.0}
 CONVERSATION CONTEXT: {context_str}
 
 IMPORTANT: Only recommend stopping the conversation for serious issues like:
@@ -576,7 +576,7 @@ class EnergyAwareGirlfriendAgent:
         # Analyze user's energy
         print("🔍 DEBUG: Analyzing user energy...")
         user_energy = await self.energy_analyzer.analyze_message_energy(user_message)
-        print(f"🔍 DEBUG: User energy: {user_energy.energy_level.value}")
+        print(f"🔍 DEBUG: User energy: {user_energy.energy_level.value if user_energy else 'None'}")
         
         context.current_energy = user_energy
         context.energy_history.append(user_energy)
@@ -616,7 +616,11 @@ class EnergyAwareGirlfriendAgent:
                                user_message: str, safety_status: str) -> str:
         """Build comprehensive, context-aware prompt"""
         
-        energy_level = user_energy.energy_level
+        # Handle case where user_energy might be None
+        if user_energy is None:
+            energy_level = EnergyLevel.MEDIUM
+        else:
+            energy_level = user_energy.energy_level
         energy_config = self.personality_matrix["energy_responses"][energy_level]
         safety_config = self.personality_matrix["safety_responses"][safety_status]
         
@@ -630,7 +634,7 @@ class EnergyAwareGirlfriendAgent:
         
         # Analyze conversation patterns and emotional trajectory
         emotional_context = ""
-        if len(context.energy_history) > 1:
+        if len(context.energy_history) > 1 and user_energy:
             prev_emotion = context.energy_history[-2].dominant_emotion.value
             curr_emotion = user_energy.dominant_emotion.value
             if prev_emotion != curr_emotion:
@@ -699,10 +703,10 @@ PERSONALITY TRAITS:
 {personality_instructions}
 
 CURRENT CONTEXT:
-- User's Energy: {energy_level.value} ({user_energy.intensity_score:.2f} intensity)
-- Dominant Emotion: {user_energy.dominant_emotion.value}
-- Energy Type: {user_energy.energy_type.value}
-- Nervous System: {user_energy.nervous_system_state.value}
+- User's Energy: {energy_level.value} ({user_energy.intensity_score if user_energy else 0.5:.2f} intensity)
+- Dominant Emotion: {user_energy.dominant_emotion.value if user_energy else 'happy'}
+- Energy Type: {user_energy.energy_type.value if user_energy else 'neutral'}
+- Nervous System: {user_energy.nervous_system_state.value if user_energy else 'rest_and_digest'}
 {emotional_context}
 
 CONVERSATION HISTORY:

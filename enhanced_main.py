@@ -238,7 +238,7 @@ class EnhancedMultiAgentConversation:
             self.current_session.context.current_energy = response_energy
 
             # Display response with energy indicators
-            energy_emoji = await self._get_energy_emoji(response_energy.energy_level)
+            energy_emoji = await self._get_energy_emoji(response_energy.energy_level if response_energy else EnergyLevel.MEDIUM)
             print(f"\n{energy_emoji} {response_content}")
 
             # Show energy status
@@ -274,14 +274,32 @@ class EnhancedMultiAgentConversation:
     async def _detect_energy_flags(self, current_energy: EnergySignature,
                                  recent_energies: List[EnergySignature]) -> Dict[str, str]:
         """Detect energy flags based on patterns"""
+        
+        # Check if current_energy is None
+        if current_energy is None:
+            return {"status": "yellow", "reason": "Energy analysis unavailable"}
 
-        # Red flags
+        # Red flags - Crisis situations
         if current_energy.energy_level == EnergyLevel.NONE:
             return {"status": "red", "reason": "Complete energy withdrawal detected"}
 
+        # Crisis detection - death, loss, grief, trauma
         if (current_energy.dominant_emotion == EmotionState.SAD and
-            current_energy.intensity_score > 0.9):
-            return {"status": "red", "reason": "Intense sadness detected"}
+            current_energy.intensity_score > 0.7):
+            return {"status": "red", "reason": "Crisis situation detected - intense sadness"}
+
+        # Check for crisis keywords in recent messages
+        if self.current_session and self.current_session.context.messages:
+            last_user_message = None
+            for msg in reversed(self.current_session.context.messages[-3:]):
+                if msg.get('role') == 'user':
+                    last_user_message = msg.get('content', '').lower()
+                    break
+            
+            if last_user_message:
+                crisis_keywords = ['died', 'death', 'dead', 'loss', 'lost', 'grief', 'trauma', 'emergency', 'crisis', 'hurt', 'pain', 'suffering']
+                if any(keyword in last_user_message for keyword in crisis_keywords):
+                    return {"status": "red", "reason": "Crisis situation detected - user mentioned loss/death"}
 
         if (current_energy.nervous_system_state == NervousSystemState.FIGHT and
             current_energy.intensity_score > 0.8):
@@ -289,7 +307,7 @@ class EnhancedMultiAgentConversation:
 
         # Yellow flags
         if (current_energy.energy_level == EnergyLevel.LOW and
-            any(sig.energy_level in [EnergyLevel.HIGH, EnergyLevel.INTENSE] for sig in recent_energies[-3:])):
+            any(sig and sig.energy_level in [EnergyLevel.HIGH, EnergyLevel.INTENSE] for sig in recent_energies[-3:] if sig)):
             return {"status": "yellow", "reason": "Energy drop from high to low"}
 
         if (current_energy.dominant_emotion == EmotionState.ANXIOUS and
@@ -328,14 +346,27 @@ class EnhancedMultiAgentConversation:
 
         # Energy-based decisions with safety status
         if self.energy_flags["status"] == "red":
-            decision = {
-                "action": "stop",
-                "reason": f"Energy red flag: {self.energy_flags['reason']}",
-                "confidence": 0.9,
-                "safety_status": "red"
-            }
-            print(f"🔍 DEBUG: Decision: {decision}")
-            return decision
+            # Check if this is a crisis situation that needs support, not stopping
+            if "crisis" in self.energy_flags["reason"].lower() or "loss" in self.energy_flags["reason"].lower() or "death" in self.energy_flags["reason"].lower():
+                # Crisis situations need support, not stopping
+                decision = {
+                    "action": "continue",
+                    "reason": f"Crisis support needed: {self.energy_flags['reason']}",
+                    "confidence": 0.9,
+                    "safety_status": "red"
+                }
+                print(f"🔍 DEBUG: Crisis support decision: {decision}")
+                return decision
+            else:
+                # Other red flags still stop the conversation
+                decision = {
+                    "action": "stop",
+                    "reason": f"Energy red flag: {self.energy_flags['reason']}",
+                    "confidence": 0.9,
+                    "safety_status": "red"
+                }
+                print(f"🔍 DEBUG: Decision: {decision}")
+                return decision
         
         elif self.energy_flags["status"] == "yellow":
             safety_status = "yellow"  # Downgrade to yellow if energy flags are concerning
@@ -459,13 +490,14 @@ class EnhancedMultiAgentConversation:
 
         # Energy trends
         if self.current_session.context.energy_history:
-            recent_energies = self.current_session.context.energy_history[-10:]
-            metrics["energy_trends"] = {
-                "trend": "increasing" if recent_energies[-1].intensity_score > recent_energies[0].intensity_score else "decreasing",
-                "current_level": recent_energies[-1].energy_level.value,
-                "peak_intensity": max(sig.intensity_score for sig in recent_energies),
-                "avg_intensity": sum(sig.intensity_score for sig in recent_energies) / len(recent_energies)
-            }
+            recent_energies = [sig for sig in self.current_session.context.energy_history[-10:] if sig is not None]
+            if recent_energies:
+                metrics["energy_trends"] = {
+                    "trend": "increasing" if recent_energies[-1].intensity_score > recent_energies[0].intensity_score else "decreasing",
+                    "current_level": recent_energies[-1].energy_level.value,
+                    "peak_intensity": max(sig.intensity_score for sig in recent_energies),
+                    "avg_intensity": sum(sig.intensity_score for sig in recent_energies) / len(recent_energies)
+                }
 
         return metrics
 

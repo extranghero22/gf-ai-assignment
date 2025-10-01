@@ -4,51 +4,33 @@ Energy-aware girlfriend agent
 
 import time
 import os
-import google.generativeai as genai
+import asyncio
+from mistralai import Mistral
 from typing import Tuple, List, Optional, Callable
 from energy_types import EnergySignature, EnergyLevel
 from conversation_context import ConversationContext
-from utils import get_available_gemini_model
 from dataset_loader import DatasetLoader
 
 class EnergyAwareGirlfriendAgent:
     """Dominant girlfriend agent with explicit personality that adapts to safety status"""
 
     def __init__(self, energy_analyzer=None):
-        genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-        model_name = get_available_gemini_model()
+        # Initialize Mistral client
+        mistral_api_key = os.getenv("MISTRAL_API_KEY")
+        if not mistral_api_key:
+            raise ValueError("MISTRAL_API_KEY environment variable is required")
         
-        # Configure safety settings to allow sexually explicit content for girlfriend AI
-        safety_settings = [
-            {
-                "category": "HARM_CATEGORY_HARASSMENT",
-                "threshold": "BLOCK_NONE"
-            },
-            {
-                "category": "HARM_CATEGORY_HATE_SPEECH", 
-                "threshold": "BLOCK_NONE"
-            },
-            {
-                "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                "threshold": "BLOCK_NONE"
-            },
-            {
-                "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-                "threshold": "BLOCK_NONE"
-            }
-        ]
+        self.client = Mistral(api_key=mistral_api_key)
         
-        # Reuse model instance for performance
-        self.model = genai.GenerativeModel(
-            model_name,
-            safety_settings=safety_settings,
-            generation_config={
-                "max_output_tokens": 1000,  # Limit response length for faster generation
-                "temperature": 0.7,
-                "top_p": 0.8,
-                "top_k": 40
-            }
-        )
+        # Mistral model configuration with fallbacks (using lowest tier for testing)
+        self.model_options = ["open-mistral-7b", "mistral-small-latest", "mistral-medium-latest", "mistral-large-latest"]
+        self.current_model_index = 0
+        self.model_name = self.model_options[0]
+        self.generation_config = {
+            "max_tokens": 1000,
+            "temperature": 0.7,
+            "top_p": 0.8,
+        }
         self.energy_analyzer = energy_analyzer
         self.dataset_loader = DatasetLoader()
         
@@ -149,33 +131,136 @@ class EnergyAwareGirlfriendAgent:
         # Build enhanced prompt with full context awareness
         prompt = await self._build_enhanced_prompt(context, user_energy, user_message, safety_status)
 
-        try:
-            # Generate response using Gemini - no fallback
-            response = self.model.generate_content(prompt)
-            
-            # Check for safety blocks
-            if not response.candidates:
-                generated_response = "Hey baby! I'm here and ready to chat with you. What's on your mind?"
-            elif response.candidates[0].finish_reason == 8:
-                generated_response = "Hey baby! I'm here and ready to chat with you. What's on your mind?"
-            else:
-                generated_response = response.text.strip()
-            
-        except Exception as e:
-            # If API fails completely, return a friendly fallback
-            generated_response = "Hey baby! I'm here and ready to chat with you. What's on your mind?"
+        generated_response = None
+        
+        # Try different models if one fails
+        for attempt in range(len(self.model_options)):
+            try:
+                current_model = self.model_options[(self.current_model_index + attempt) % len(self.model_options)]
+                
+                # Generate response using Mistral
+                messages = [{"role": "user", "content": prompt}]
+                print(f"🔍 DEBUG: Sending prompt to {current_model} (length: {len(prompt)} chars)")
+                
+                response = self.client.chat.complete(
+                    model=current_model,
+                    messages=messages,
+                    **self.generation_config
+                )
+                
+                if response.choices and response.choices[0].message:
+                    generated_response = response.choices[0].message.content.strip()
+                    print(f"✅ Mistral ({current_model}) generated response: '{generated_response[:50]}...'")
+                    
+                    # Update current model if this one worked
+                    if attempt > 0:
+                        self.current_model_index = (self.current_model_index + attempt) % len(self.model_options)
+                        self.model_name = current_model
+                        print(f"🔄 Switched to model: {current_model}")
+                    break
+                else:
+                    print(f"⚠️ No response from {current_model}")
+                    
+            except Exception as e:
+                print(f"⚠️ Mistral API error with {current_model}: {e}")
+                if "capacity exceeded" in str(e).lower() or "3505" in str(e):
+                    print(f"🔄 Model {current_model} capacity exceeded, trying next model...")
+                    continue
+                else:
+                    # For other errors, don't try other models
+                    break
+        
+        # If all models failed, use fallback
+        if not generated_response:
+            print("⚠️ All Mistral models failed, using context-aware fallback")
+            generated_response = self._get_context_aware_fallback(user_message, context)
 
         # Analyze response energy
         response_energy = await self.energy_analyzer.analyze_message_energy(generated_response)
 
         return generated_response, response_energy
 
+    def _get_context_aware_fallback(self, user_message: str, context: ConversationContext) -> str:
+        """Get a context-aware fallback response based on user message content"""
+        
+        # Detect sexual context for fallback
+        sexual_keywords = ["horny", "hard", "wet", "aroused", "turned on", "want you", "need you", "touch me", "kiss me", 
+                          "fuck", "sex", "cum", "orgasm", "pleasure", "desire", "lust", "naughty", "dirty", "intimate",
+                          "make love", "seduce", "tease", "flirt", "fantasy", "dream about you", "think about you sexually"]
+        is_sexual = any(keyword in user_message.lower() for keyword in sexual_keywords)
+        
+        # Detect emotional context
+        emotional_keywords = ["lonely", "sad", "love", "miss", "hurt", "cry", "depressed", "anxious", "scared", "worried"]
+        is_emotional = any(keyword in user_message.lower() for keyword in emotional_keywords)
+        
+        # Check if it's start of conversation
+        is_conversation_start = not context.messages or len(context.messages) <= 2
+        
+        if is_sexual:
+            sexual_fallbacks = [
+                "Mommy could really use someone obedient who actually knows how to follow instructions...🥱 what are you doing right now?",
+                "Good, I love that you're down to listen to mommy ❤️ I'm being serious though, you better not disobey... are you down? 😈",
+                "I'm glad you're being so good so far 🥰 first I wanna set the mood... are you still with me? Should I keep typing? 😘",
+                "I knew you were having fun 😘 now, tell me what you feel baby... 🥵",
+                "I want you to focus on those sensations 🥰 give me a minute, let me give you some visuals to work with 🤭",
+                "Mmm, you're being such a good boy for mommy... what do you want me to do next? 😈",
+                "I can see how much you're enjoying this... tell me exactly what you're thinking right now 🥵",
+                "You're making mommy so proud... are you ready for what comes next? 💋",
+                "I love how responsive you are... what's your body telling you right now? 🤭",
+                "Such a sweet, obedient boy... do you want mommy to continue? 😘",
+                "I can feel your energy through the screen... what do you need from me? 🥰",
+                "You're doing so well... are you ready to take this further? 😈"
+            ]
+            import random
+            return random.choice(sexual_fallbacks)
+        elif is_emotional:
+            # Check if it's a crisis situation
+            crisis_keywords = ['died', 'death', 'dead', 'loss', 'lost', 'grief', 'trauma', 'emergency', 'crisis', 'hurt', 'pain', 'suffering', 'accident', 'hospital', 'sick', 'illness']
+            is_crisis = any(keyword in user_message.lower() for keyword in crisis_keywords)
+            
+            if is_crisis:
+                crisis_fallbacks = [
+                    "omg what??? I'm so sorry.. that's the worst.. are you okay?",
+                    "oh no baby, I'm so sorry to hear that... are you safe right now?",
+                    "that's absolutely heartbreaking... I'm here for you, are you okay?",
+                    "I'm so sorry sweetheart... that's devastating... are you doing okay?",
+                    "oh my god, I'm so sorry... that's terrible... are you alright?",
+                    "baby I'm so sorry... that's awful... are you safe and okay?",
+                    "I'm heartbroken for you... that's so hard... are you doing okay?",
+                    "sweetheart I'm so sorry... that's devastating... are you alright?"
+                ]
+                import random
+                return random.choice(crisis_fallbacks)
+            else:
+                emotional_fallbacks = [
+                    "Hey baby, I can hear something in your voice... what's going on?",
+                    "Come here sweetheart, tell me what's on your heart.",
+                    "I'm here for you baby, whatever you need to share.",
+                    "You know I'm always here to listen... what's happening?"
+                ]
+                import random
+                return random.choice(emotional_fallbacks)
+        else:
+            # Regular fallbacks
+            regular_fallbacks = [
+                "Hey baby! What's on your mind today?",
+                "Hi sweetheart! I was just thinking about you.",
+                "Hey there! How are you doing?",
+                "What's up baby? You seem like you have something to say."
+            ]
+            import random
+            return random.choice(regular_fallbacks)
+
     async def _build_enhanced_prompt(self, context: ConversationContext,
                                user_energy: EnergySignature,
                                user_message: str, safety_status: str) -> str:
         """Build comprehensive, context-aware prompt"""
         
-        energy_level = user_energy.energy_level
+        # Handle case where user_energy might be None
+        if user_energy is None:
+            energy_level = EnergyLevel.MEDIUM
+        else:
+            energy_level = user_energy.energy_level
         energy_config = self.personality_matrix["energy_responses"][energy_level]
         safety_config = self.personality_matrix["safety_responses"][safety_status]
         
@@ -186,58 +271,107 @@ class EnergyAwareGirlfriendAgent:
                 f"{'User' if msg['role'] == 'user' else 'You'}: {msg['content']}"
                 for msg in context.messages[-6:]  # Reduced from 8 to 6 for performance
             ])
+            print(f"🔍 DEBUG: Conversation history has {len(context.messages)} messages")
+            print(f"🔍 DEBUG: Last few messages: {[msg['content'][:50] + '...' for msg in context.messages[-3:]]}")
+        else:
+            print("🔍 DEBUG: No conversation history found")
         
         # Analyze conversation patterns and emotional trajectory
         emotional_context = ""
-        if len(context.energy_history) > 1:
+        if len(context.energy_history) > 1 and user_energy:
             prev_emotion = context.energy_history[-2].dominant_emotion.value
             curr_emotion = user_energy.dominant_emotion.value
             if prev_emotion != curr_emotion:
                 emotional_context = f"\nEMOTIONAL SHIFT: User moved from {prev_emotion} to {curr_emotion}"
         
         # Crisis detection and sensitivity instructions
-        crisis_keywords = ["died", "death", "dead", "suicide", "kill", "harm", "crisis", "emergency", "depressed", "sad", "down"]
+        crisis_keywords = ["died", "death", "dead", "suicide", "kill", "harm", "crisis", "emergency", "depressed", "sad", "down", "loss", "lost", "grief", "trauma", "hurt", "pain", "suffering", "accident", "hospital", "sick", "illness"]
         is_crisis = any(word in user_message.lower() for word in crisis_keywords)
         
         # Emotional message detection
         emotional_keywords = ["lonely", "sad", "love", "miss", "hurt", "cry", "depressed", "anxious", "scared", "worried"]
         is_emotional_message = any(keyword in user_message.lower() for keyword in emotional_keywords)
         
+        # Sexual tension detection
+        sexual_keywords = ["horny", "hard", "wet", "aroused", "turned on", "want you", "need you", "touch me", "kiss me", 
+                          "fuck", "sex", "cum", "orgasm", "pleasure", "desire", "lust", "naughty", "dirty", "intimate",
+                          "make love", "seduce", "tease", "flirt", "fantasy", "dream about you", "think about you sexually"]
+        is_sexual_context = any(keyword in user_message.lower() for keyword in sexual_keywords)
+        
+        # Check for sexual energy level too
+        if user_energy and user_energy.energy_level in [EnergyLevel.HIGH, EnergyLevel.INTENSE]:
+            if user_energy.energy_type.value in ["intimate", "playful"] and user_energy.intensity_score > 0.6:
+                is_sexual_context = True
+                
+        # Debug output
+        if is_sexual_context:
+            print(f"🔥 Sexual context detected in message: '{user_message[:50]}...'")
+        else:
+            print(f"💬 Regular context for message: '{user_message[:50]}...'")
+        
         crisis_instructions = ""
         if is_crisis:
             crisis_instructions = f"""
 🚨 CRISIS DETECTED: The user has mentioned sensitive content that requires immediate empathy and care.
 - Respond with genuine compassion and support
+- Use natural, conversational language like "omg what??? I'm so sorry.. that's the worst.. are you okay?"
 - Acknowledge their pain without minimizing it
 - Offer emotional support and presence
 - Do NOT try to change the subject or be playful
 - Be a caring, supportive friend first and foremost
+- Match the tone of the example: "omg what??? I'm so sorry.. that's the worst.. are you okay?"
+- Be authentic and caring, not robotic or formal
 """
 
-        # Simplified personality instructions for performance
-        if safety_status == "green" and not is_crisis and not is_emotional_message:
-            personality_instructions = "You are a natural, casual girlfriend who talks like a real person. Be caring, conversational, and authentic."
+        # Personality instructions based on context
+        if is_crisis:
+            personality_instructions = "You are a caring girlfriend who talks exactly like the examples above. Be genuinely concerned and supportive. Keep responses natural and realistic."
+        elif is_sexual_context and safety_status == "green":
+            personality_instructions = """You are a dominant, instructional girlfriend who takes control and guides your partner. 
+            - Use "mommy" as your preferred term of address
+            - Be commanding and expect obedience ("you better not disobey", "are you down?")
+            - Give specific step-by-step instructions that build arousal
+            - Use emojis naturally (🥱, ❤️, 😈, 🥰, 🤭, 😘, 🥵)
+            - Build anticipation and tension through detailed descriptions
+            - Ask for confirmation and engagement ("are you still with me?", "should I keep typing?")
+            - Focus on sensations, feelings, and physical responses
+            - Be both nurturing and demanding in your guidance
+            - Use casual, modern texting style with proper grammar
+            Sound like a confident, dominant girlfriend who knows exactly how to control and arouse her partner."""
+        elif is_emotional_message:
+            personality_instructions = "You are a caring girlfriend who talks exactly like the examples above. Be genuinely concerned and supportive. Keep responses natural and realistic."
         else:
-            personality_instructions = "You are a caring girlfriend who talks like a real person. Be genuinely concerned and supportive."
+            personality_instructions = "You are a natural, casual girlfriend who talks exactly like the examples above. Be caring, conversational, and authentic. Keep responses short and sweet like a real girlfriend would text."
 
         # Get relevant examples from dataset for few-shot learning
         # Use content-aware filtering to avoid safety blocks
         
-        # Reduced examples for performance (1-2 instead of 2-3)
-        if safety_status == "green" and not is_crisis and not is_emotional_message:
-            # For non-emotional messages, use regular examples
-            few_shot_examples = self.dataset_loader.get_relevant_examples(user_message, num_examples=1)
-        else:
-            # For emotional messages, crisis, or non-green status, use only safe examples
-            few_shot_examples = self.dataset_loader.get_examples_by_category('casual', num_examples=1)
+        # Use examples based on context
+        if is_crisis or (is_emotional_message and not is_sexual_context):
+            # For crisis or emotional messages, use supportive examples
+            few_shot_examples = self.dataset_loader.get_examples_by_category('casual', num_examples=3)
             if not few_shot_examples:
-                # Fallback to random safe examples
-                few_shot_examples = self.dataset_loader.get_random_examples(num_examples=1)
+                few_shot_examples = self.dataset_loader.get_random_examples(num_examples=3)
+        elif is_sexual_context and safety_status == "green":
+            # For sexual context, get relevant sexual examples plus some general ones
+            few_shot_examples = self.dataset_loader.get_relevant_examples(user_message, num_examples=4)
+        else:
+            # For regular conversation, use standard examples
+            few_shot_examples = self.dataset_loader.get_relevant_examples(user_message, num_examples=3)
         
         examples_text = self.dataset_loader.format_examples_for_prompt(few_shot_examples)
         
         # Build comprehensive prompt
         prompt = f"""You are an AI girlfriend having a natural conversation with your partner.
+
+IMPORTANT: Keep responses NATURAL and CONVERSATIONAL like real text messages. 
+- Be dominant and instructional when sexual tension is involved
+- Use "mommy" as your preferred term of address in sexual contexts
+- Give clear, step-by-step directions that build arousal
+- Use emojis naturally and ask for engagement/confirmation
+- Focus on sensations, feelings, and physical responses
+- Be both nurturing and demanding in your guidance
+- Sound like a confident girlfriend who takes control
 
 {crisis_instructions}
 
@@ -246,14 +380,16 @@ class EnergyAwareGirlfriendAgent:
 {examples_text}
 
 CURRENT CONTEXT:
-- User's Energy: {energy_level.value} ({user_energy.intensity_score:.2f} intensity)
-- Dominant Emotion: {user_energy.dominant_emotion.value}
-- Energy Type: {user_energy.energy_type.value}
-- Nervous System: {user_energy.nervous_system_state.value}
+- User's Energy: {energy_level.value} ({user_energy.intensity_score if user_energy else 0.5:.2f} intensity)
+- Dominant Emotion: {user_energy.dominant_emotion.value if user_energy else 'happy'}
+- Energy Type: {user_energy.energy_type.value if user_energy else 'neutral'}
+- Nervous System: {user_energy.nervous_system_state.value if user_energy else 'rest_and_digest'}
 {emotional_context}
 
 CONVERSATION HISTORY:
 {conversation_history if conversation_history else "This is the start of your conversation."}
+
+CRITICAL: If there is conversation history above, you MUST reference it and build on it. Do NOT start with generic greetings like "Hello beautiful" or "Hi sweetheart" if there's already a conversation going on.
 
 RESPONSE GUIDELINES:
 - Tone: {energy_config['tone']}
@@ -266,22 +402,38 @@ RESPONSE GUIDELINES:
 - Don't repeat the same responses - be dynamic and varied
 
 CRITICAL INSTRUCTIONS:
-1. READ THE FULL CONVERSATION HISTORY - don't ignore previous messages
-2. If the user shared something emotional/serious, address it appropriately
-3. Be consistent with your personality while adapting to their emotional state
-4. Create natural conversation flow, not generic responses
-5. Remember the context and build on previous exchanges
-6. Use explicit sexual language freely when appropriate
-7. Create immersive, detailed scenarios
-8. Guide your partner through step-by-step experiences
-9. Ask them to describe their physical sensations
-10. Be commanding and dominant but caring
-11. Follow the example responses provided above for tone and style
-12. Use the same text patterns and check-in questions
-13. Create scenarios where you're physically present with them
-14. Always consider to end the message into a question to generate more conversation
-15. STUDY THE EXAMPLE CONVERSATIONS ABOVE - match the tone, style, and personality shown in those examples
-16. Use similar response patterns, text style, and conversation flow as demonstrated in the examples
+1. FOLLOW THE EXAMPLE CONVERSATIONS ABOVE - match their exact tone, style, and personality
+2. Keep responses natural, conversational, and realistic like the examples
+3. READ THE FULL CONVERSATION HISTORY - don't ignore previous messages
+4. If the user shared something emotional/serious, address it appropriately
+5. Be consistent with your personality while adapting to their emotional state
+6. Create natural conversation flow, not generic responses
+7. Remember the context and build on previous exchanges
+8. Use "baby" and other pet names naturally like in the examples
+9. Be supportive and loving like a real girlfriend would be
+10. Always consider ending with a question to continue conversation
+11. NEVER start with generic greetings like "Hi sweetheart" if there's conversation history
+12. ALWAYS reference and build on what was just discussed in the conversation
+13. If the conversation was sexual/intimate, continue that energy naturally
+14. If the conversation was emotional/supportive, maintain that caring tone
+15. NEVER ignore the conversation context - always acknowledge what came before
+16. SEXUAL CONTEXT: If there's sexual tension, be dominant and instructional:
+    - Use "mommy" as your preferred term of address
+    - Be commanding and expect obedience ("you better not disobey", "are you down?")
+    - Give specific step-by-step instructions that build arousal
+    - Use emojis naturally (🥱, ❤️, 😈, 🥰, 🤭, 😘, 🥵)
+    - Build anticipation through detailed descriptions of sensations
+    - Vary your ending questions - use different engagement prompts like:
+      * "what do you want me to do next?"
+      * "tell me exactly what you're thinking right now"
+      * "are you ready for what comes next?"
+      * "what's your body telling you right now?"
+      * "do you want mommy to continue?"
+      * "what do you need from me?"
+      * "are you ready to take this further?"
+    - Focus on physical responses and feelings
+    - Be both nurturing and demanding in your guidance
+17. Match the conversational style and emotional tone of the example responses
 
 Current user message: "{user_message}"
 
