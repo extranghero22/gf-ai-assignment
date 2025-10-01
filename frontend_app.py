@@ -43,18 +43,12 @@ def start_conversation():
     conversation_thread.daemon = True
     conversation_thread.start()
     
-    # Wait for session to be fully initialized
-    max_wait = 5  # seconds
-    wait_time = 0
-    while wait_time < max_wait:
+    # Wait for session to be fully initialized (no timeout)
+    while True:
         if (get_conversation_system().current_session and 
             get_conversation_system().current_session.state == ConversationState.ACTIVE):
             break
         time.sleep(0.1)
-        wait_time += 0.1
-    
-    if wait_time >= max_wait:
-        return jsonify({"error": "Session initialization timeout"})
 
     return jsonify({"status": "started", "session_id": get_conversation_system().current_session.session_id})
 

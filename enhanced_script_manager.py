@@ -272,7 +272,7 @@ class EnhancedScriptManager:
             return self.scenarios["crisis_scenario"]
 
         # Low energy detection
-        elif energy_signature.energy_level == EnergyLevel.LOW:
+        elif energy_signature and energy_signature.energy_level == EnergyLevel.LOW:
             return self.scenarios["low_energy_scenario"]
 
         # High intimacy indicators
@@ -311,14 +311,14 @@ class EnhancedScriptManager:
         content = message_template.content
 
         # Energy-based adaptations
-        if user_energy.energy_level == EnergyLevel.LOW:
+        if user_energy and user_energy.energy_level == EnergyLevel.LOW:
             # Make content gentler and more supportive
             if "!" in content:
                 content = content.replace("!", "...")
             if "excited" in content.lower() or "amazing" in content.lower():
                 content = content.replace("excited", "gentle").replace("amazing", "comforting")
 
-        elif user_energy.energy_level == EnergyLevel.HIGH:
+        elif user_energy and user_energy.energy_level == EnergyLevel.HIGH:
             # Make content more enthusiastic
             if not content.endswith("!"):
                 content = content.replace(".", "!")

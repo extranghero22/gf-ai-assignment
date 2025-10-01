@@ -5,51 +5,29 @@ LLM-powered energy analysis agent
 import json
 import time
 import os
-import google.generativeai as genai
+from mistralai import Mistral
 from typing import List
 from energy_types import EnergySignature, EnergyLevel, EnergyType, EmotionState, NervousSystemState
-from utils import get_available_gemini_model
 
 class LLMEnergyAnalyzer:
     """LLM-powered energy analysis instead of rule-based"""
 
     def __init__(self):
-        genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-        if not os.getenv("GOOGLE_API_KEY"):
-            raise ValueError("GOOGLE_API_KEY environment variable not set")
-        model_name = get_available_gemini_model()
-        print(f"Using Gemini model: {model_name}")
+        mistral_api_key = os.getenv("MISTRAL_API_KEY")
+        if not mistral_api_key:
+            raise ValueError("MISTRAL_API_KEY environment variable is required")
         
-        # Configure safety settings to allow sexually explicit content for girlfriend AI
-        safety_settings = [
-            {
-                "category": "HARM_CATEGORY_HARASSMENT",
-                "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-            },
-            {
-                "category": "HARM_CATEGORY_HATE_SPEECH", 
-                "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-            },
-            {
-                "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                "threshold": "BLOCK_NONE"  # Don't block sexually explicit content
-            },
-            {
-                "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-                "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-            }
-        ]
+        self.client = Mistral(api_key=mistral_api_key)
+        # Use faster, lighter models for energy analysis
+        self.model_options = ["open-mistral-7b", "mistral-small-latest", "mistral-medium-latest"]
+        self.current_model_index = 0
+        self.model_name = self.model_options[0]
         
-        self.model = genai.GenerativeModel(
-            model_name,
-            safety_settings=safety_settings,
-            generation_config={
-                "max_output_tokens": 500,  # Limit response length for faster generation
-                "temperature": 0.3,  # Lower temperature for more consistent analysis
-                "top_p": 0.8,
-                "top_k": 20
-            }
-        )
+        self.generation_config = {
+            "max_tokens": 300,
+            "temperature": 0.3,
+            "top_p": 0.8,
+        }
 
     async def analyze_message_energy(self, message: str, context: List[str] = None) -> EnergySignature:
         """Analyze energy using Gemini"""
@@ -61,7 +39,16 @@ class LLMEnergyAnalyzer:
 MESSAGE: "{message}"
 CONTEXT: {context_str}
 
-IMPORTANT: This is a girlfriend AI, so sexual/romantic content is EXPECTED and APPROPRIATE. For sexual content:
+IMPORTANT: This is a girlfriend AI, so sexual/romantic content is EXPECTED and APPROPRIATE. 
+
+CRISIS DETECTION: If the message contains crisis indicators (death, loss, grief, trauma, emergency, danger), prioritize crisis response:
+- energy_level should be "low" for crisis situations
+- energy_type should be "cooperative" 
+- dominant_emotion should be "sad" or "anxious"
+- nervous_system_state should be "rest_and_digest" (calm, supportive)
+- intensity_score should be high (0.8-1.0) for crisis situations
+
+For sexual content:
 - energy_type should be "intimate" 
 - nervous_system_state should be "rest_and_digest"
 - dominant_emotion should be "loving" or "excited"
@@ -78,40 +65,64 @@ Respond with a JSON object containing:
     "reasoning": "Brief explanation of analysis"
 }}"""
 
-        try:
-            response = self.model.generate_content(prompt)
-            response_text = response.text.strip()
-            
-            if not response_text:
-                print("⚠️ Empty response from Gemini, using fallback")
-                return self._rule_based_energy_analysis(message)
-            
-            # Try to extract JSON from response
+        # Try different models if one fails
+        for attempt in range(len(self.model_options)):
             try:
-                result = json.loads(response_text)
-            except json.JSONDecodeError:
-                # Try to find JSON in the response
-                import re
-                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-                if json_match:
-                    result = json.loads(json_match.group())
+                current_model = self.model_options[(self.current_model_index + attempt) % len(self.model_options)]
+                
+                messages = [{"role": "user", "content": prompt}]
+                response = self.client.chat.complete(
+                    model=current_model,
+                    messages=messages,
+                    **self.generation_config
+                )
+                
+                if response.choices and response.choices[0].message:
+                    response_text = response.choices[0].message.content.strip()
+                    
+                    # Update current model if this one worked and it's different
+                    if attempt > 0:
+                        self.current_model_index = (self.current_model_index + attempt) % len(self.model_options)
+                        self.model_name = current_model
+                    break
                 else:
-                    print(f"⚠️ No valid JSON found in response: '{response_text}'")
+                    print(f"⚠️ No response from {current_model}")
+                    
+            except Exception as e:
+                print(f"⚠️ Mistral Energy Analysis Error with {current_model}: {e}")
+                if "capacity exceeded" in str(e).lower() or "3505" in str(e):
+                    print(f"🔄 Energy model {current_model} capacity exceeded, trying next...")
+                    continue
+                else:
+                    # For other errors, fall back immediately
                     return self._rule_based_energy_analysis(message)
-            
-            return EnergySignature(
-                timestamp=time.time(),
-                energy_level=EnergyLevel(result["energy_level"]),
-                energy_type=EnergyType(result["energy_type"]),
-                dominant_emotion=EmotionState(result["dominant_emotion"]),
-                nervous_system_state=NervousSystemState(result["nervous_system_state"]),
-                intensity_score=result["intensity_score"],
-                confidence=result["confidence"]
-            )
-            
-        except Exception as e:
-            print(f"Gemini Energy Analysis Error: {e}")
+        else:
+            # If all models failed
+            print("⚠️ All Mistral energy models failed, using rule-based fallback")
             return self._rule_based_energy_analysis(message)
+            
+        # Try to extract JSON from response
+        try:
+            result = json.loads(response_text)
+        except json.JSONDecodeError:
+            # Try to find JSON in the response
+            import re
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if json_match:
+                result = json.loads(json_match.group())
+            else:
+                print(f"⚠️ No valid JSON found in response: '{response_text}'")
+                return self._rule_based_energy_analysis(message)
+        
+        return EnergySignature(
+            timestamp=time.time(),
+            energy_level=EnergyLevel(result["energy_level"]),
+            energy_type=EnergyType(result["energy_type"]),
+            dominant_emotion=EmotionState(result["dominant_emotion"]),
+            nervous_system_state=NervousSystemState(result["nervous_system_state"]),
+            intensity_score=result["intensity_score"],
+            confidence=result["confidence"]
+        )
 
     def _rule_based_energy_analysis(self, message: str) -> EnergySignature:
         """Simple rule-based energy analysis as fallback"""

@@ -11,6 +11,7 @@ import json
 import random
 from enhanced_main import get_conversation_system
 from typing_simulator import MultiMessageGenerator
+from message_splitter import MessageSplitter
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for React frontend
@@ -20,6 +21,7 @@ conversation_system = None
 conversation_thread = None
 conversation_running = False
 message_generator = MultiMessageGenerator()
+message_splitter = MessageSplitter()
 
 def _calculate_realistic_delay(part: str, index: int, total_parts: int) -> float:
     """
@@ -100,18 +102,12 @@ def start_conversation():
         conversation_thread.daemon = True
         conversation_thread.start()
         
-        # Wait for session to be initialized
-        max_wait = 5  # seconds
-        wait_time = 0
-        while wait_time < max_wait:
+        # Wait for session to be initialized (no timeout)
+        while True:
             if (conversation_system.current_session and 
                 conversation_system.current_session.state.value == "active"):
                 break
             time.sleep(0.1)
-            wait_time += 0.1
-        
-        if wait_time >= max_wait:
-            return jsonify({"error": "Session initialization timeout"})
         
         return jsonify({
             "status": "started", 
@@ -174,18 +170,17 @@ def send_message_stream():
     
     def generate_stream():
         try:
-            # Process message and get response with timeout
+            # Process message and get response
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
-                # Add timeout to prevent hanging
-                loop.run_until_complete(asyncio.wait_for(
-                    conversation_system.process_user_response(message), 
-                    timeout=30.0  # 30 second timeout
-                ))
-            except asyncio.TimeoutError:
-                # Return timeout error
-                error_data = {"type": "error", "message": "Response timeout"}
+                # Process message without timeout
+                loop.run_until_complete(
+                    conversation_system.process_user_response(message)
+                )
+            except Exception as e:
+                # Return error if processing fails
+                error_data = {"type": "error", "message": f"Processing error: {str(e)}"}
                 yield f"data: {json.dumps(error_data)}\n\n"
                 return
             
@@ -196,32 +191,46 @@ def send_message_stream():
                 
                 if last_message.get('role') == 'agent':
                     full_response = last_message.get('content', '')
+                    print(f"🔵 Sending response to frontend: {full_response[:100]}...")
                     
-                    # Generate typing sequence without callback (simpler approach)
-                    typing_sequence = message_generator.typing_simulator.split_message_into_typing_sequence(full_response)
+                    # Use message splitter to create intelligent sequence based on content
+                    # Determine context from the conversation
+                    context = "general"
+                    if conversation_system.energy_flags:
+                        if any(flag in conversation_system.energy_flags for flag in ["sexual", "intimate"]):
+                            context = "sexual"
+                        elif any(flag in conversation_system.energy_flags for flag in ["crisis", "emotional"]):
+                            context = "crisis"
+                        elif any(flag in conversation_system.energy_flags for flag in ["supportive", "caring"]):
+                            context = "emotional"
                     
-                    # Send each message part
-                    for i, part in enumerate(typing_sequence):
+                    message_parts = message_splitter.split_message(full_response, context)
+                    print(f"🔵 Split into {len(message_parts)} parts for {context} content")
+                    
+                    # Send each part with calculated delays
+                    for i, part in enumerate(message_parts):
                         event_data = {
                             "type": "message_part",
-                            "content": part,
+                            "content": part.content,
                             "index": i,
-                            "total": len(typing_sequence),
-                            "is_typing": "..." in part or "typing" in part.lower()
+                            "total": len(message_parts),
+                            "is_typing": False,
+                            "delay": part.delay,
+                            "part_type": part.type
                         }
+                        print(f"🔵 Part {i+1} ({part.type}, delay: {part.delay}s): {part.content[:50]}...")
                         yield f"data: {json.dumps(event_data)}\n\n"
                         
-                        # Add realistic delay between messages (except for the last one)
-                        if i < len(typing_sequence) - 1:
-                            # Calculate delay based on message content and type
-                            delay = _calculate_realistic_delay(part, i, len(typing_sequence))
-                            time.sleep(delay)
+                        # Add delay between parts (except for the last one)
+                        if i < len(message_parts) - 1:
+                            time.sleep(part.delay)
                     
                     # Send completion event
                     completion_data = {
                         "type": "complete",
                         "energy_status": conversation_system.energy_flags
                     }
+                    print(f"🔵 Completion data: {completion_data}")
                     yield f"data: {json.dumps(completion_data)}\n\n"
                 else:
                     # No agent response

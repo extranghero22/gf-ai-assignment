@@ -1,4 +1,5 @@
 google-generativeai
+mistralai
 asyncio
 dataclasses
 enum34
@@ -18,3 +19,4 @@ flask
 flask-socketio
 openai
 python-dotenv
+requests

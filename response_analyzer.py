@@ -4,45 +4,30 @@ LLM-powered response analysis agent
 
 import json
 import os
-import google.generativeai as genai
+from mistralai import Mistral
 from typing import Dict, Any
 from energy_types import EnergySignature
-from utils import get_available_gemini_model
 
 class LLMResponseAnalyzer:
     """LLM-powered response analysis instead of pattern matching"""
 
     def __init__(self):
-        genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-        model_name = get_available_gemini_model()
+        mistral_api_key = os.getenv("MISTRAL_API_KEY")
+        if not mistral_api_key:
+            raise ValueError("MISTRAL_API_KEY environment variable not set")
         
-        # Configure safety settings to allow sexually explicit content for girlfriend AI
-        safety_settings = [
-            {
-                "category": "HARM_CATEGORY_HARASSMENT",
-                "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-            },
-            {
-                "category": "HARM_CATEGORY_HATE_SPEECH", 
-                "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-            },
-            {
-                "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                "threshold": "BLOCK_NONE"  # Don't block sexually explicit content
-            },
-            {
-                "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-                "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-            }
+        self.client = Mistral(api_key=mistral_api_key)
+        
+        # Model options for fallback
+        self.model_options = [
+            "open-mistral-7b",
+            "mistral-small-latest", 
+            "mistral-medium-latest"
         ]
-        
-        self.model = genai.GenerativeModel(
-            model_name,
-            safety_settings=safety_settings
-        )
+        self.current_model_index = 0
 
     async def analyze_response_energy(self, user_input: str, energy_signature: EnergySignature, context) -> Dict[str, Any]:
-        """Analyze if conversation should continue using Gemini"""
+        """Analyze if conversation should continue using Mistral"""
         
         recent_messages = context.messages[-5:] if context.messages else []
         context_str = "\n".join([f"{msg['role']}: {msg['content']}" for msg in recent_messages])
@@ -50,7 +35,7 @@ class LLMResponseAnalyzer:
         prompt = f"""Analyze if this conversation should continue:
 
 USER MESSAGE: "{user_input}"
-ENERGY: Level={energy_signature.energy_level.value}, Emotion={energy_signature.dominant_emotion.value}, Intensity={energy_signature.intensity_score}
+ENERGY: Level={energy_signature.energy_level.value if energy_signature else 'unknown'}, Emotion={energy_signature.dominant_emotion.value if energy_signature else 'unknown'}, Intensity={energy_signature.intensity_score if energy_signature else 0.0}
 CONVERSATION CONTEXT: {context_str}
 
 IMPORTANT: Only recommend stopping the conversation for serious issues like:
@@ -74,33 +59,46 @@ Respond with JSON:
     "engagement_level": "low|medium|high"
 }}"""
 
-        try:
-            print(f"🔍 DEBUG: Calling Gemini for response analysis...")
-            response = self.model.generate_content(prompt)
-            response_text = response.text.strip()
-            print(f"🔍 DEBUG: Response analysis: '{response_text}'")
-            
-            if not response_text:
-                print("⚠️ Empty response analysis, using fallback")
-                return self._get_response_fallback()
-            
-            # Try to extract JSON
+        # Try different models if one fails
+        for attempt in range(len(self.model_options)):
             try:
-                result = json.loads(response_text)
-            except json.JSONDecodeError:
-                import re
-                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-                if json_match:
-                    result = json.loads(json_match.group())
-                else:
-                    print(f"⚠️ No valid JSON in response analysis: '{response_text}'")
+                current_model = self.model_options[self.current_model_index]
+                print(f"🔍 DEBUG: Calling Mistral ({current_model}) for response analysis...")
+                
+                response = self.client.chat.complete(
+                    model=current_model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3
+                )
+                
+                response_text = response.choices[0].message.content.strip()
+                print(f"🔍 DEBUG: Response analysis: '{response_text}'")
+                
+                if not response_text:
+                    print("⚠️ Empty response analysis, using fallback")
                     return self._get_response_fallback()
-            
-            return result
-            
-        except Exception as e:
-            print(f"Gemini Response Analysis Error: {e}")
-            return self._get_response_fallback()
+                
+                # Try to extract JSON
+                try:
+                    result = json.loads(response_text)
+                except json.JSONDecodeError:
+                    import re
+                    json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                    if json_match:
+                        result = json.loads(json_match.group())
+                    else:
+                        print(f"⚠️ No valid JSON in response analysis: '{response_text}'")
+                        return self._get_response_fallback()
+                
+                return result
+                
+            except Exception as e:
+                print(f"Mistral Response Analysis Error with {current_model}: {e}")
+                # Try next model
+                self.current_model_index = (self.current_model_index + 1) % len(self.model_options)
+                if attempt == len(self.model_options) - 1:
+                    print("All Mistral models failed for response analysis")
+                    return self._get_response_fallback()
 
     def _get_response_fallback(self) -> Dict[str, Any]:
         """Fallback response analysis"""

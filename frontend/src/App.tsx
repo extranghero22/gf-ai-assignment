@@ -108,11 +108,12 @@ const App: React.FC = () => {
             console.log('Setting typing indicator:', part.content);
             setCurrentStreamingMessage(part.content);
           } else {
-            // Filter out standalone punctuation and typing indicators
+            // Filter out standalone punctuation and typing indicators (but allow full messages)
             const content = part.content.trim();
-            const isTypingIndicator = content === '.' || content === '..' || content === '...' || 
-                                   content.includes('typing') || content.includes('sec') || 
-                                   content.includes('think') || content === 'um' || content === 'well' || content === 'so';
+            const isTypingIndicator = (content === '.' || content === '..' || content === '...' || 
+                                     content === 'typing...' || content === 'one sec...' || 
+                                     content === 'let me think...' || content === 'um' || content === 'well' || content === 'so') &&
+                                     content.length < 20; // Only filter if it's a short standalone indicator
             
             if (!isTypingIndicator && content.length > 0) {
               // Add message part to array
@@ -128,9 +129,9 @@ const App: React.FC = () => {
         // onComplete
         (complete: StreamComplete) => {
           console.log('Stream completed:', complete);
-          // Add all message parts as separate messages
+          // Add all message parts as sequential messages for anticipation building
           if (messageParts.length > 0) {
-            console.log('Adding message parts as separate messages:', messageParts);
+            console.log('Adding message parts as sequential messages:', messageParts);
             const newMessages: Message[] = messageParts.map((part, index) => ({
               role: 'agent' as const,
               content: part,
