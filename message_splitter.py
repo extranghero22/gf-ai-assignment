@@ -77,9 +77,17 @@ class MessageSplitter:
         # Clean the message
         message = message.strip()
         
+        # First, try to rephrase if the message is too long and repetitive
+        if len(message) > 300:
+            message = self._rephrase_long_message(message)
+        
         # Determine if message should be split based on length and context
         min_length = self._get_minimum_length_for_splitting(context)
         if len(message) < min_length:
+            return [MessagePart(content=message, type='complete', delay=0.0)]
+        
+        # Check if message has natural split points
+        if not self._has_natural_split_points(message):
             return [MessagePart(content=message, type='complete', delay=0.0)]
         
         # Detect content type for appropriate splitting strategy
@@ -89,13 +97,13 @@ class MessageSplitter:
     def _get_minimum_length_for_splitting(self, context: str) -> int:
         """Get minimum message length for splitting based on context"""
         context_thresholds = {
-            "sexual": 80,      # Split sexual content earlier for anticipation
-            "emotional": 120,  # Emotional content needs more context
-            "storytelling": 100, # Stories can be split for dramatic effect
-            "general": 150,    # General conversation needs more length
-            "crisis": 200,     # Crisis messages should rarely be split
+            "sexual": 120,     # Increased threshold to reduce spam
+            "emotional": 180,  # Emotional content needs more context
+            "storytelling": 150, # Stories can be split for dramatic effect
+            "general": 200,    # General conversation needs more length
+            "crisis": 250,     # Crisis messages should rarely be split
         }
-        return context_thresholds.get(context, 150)
+        return context_thresholds.get(context, 200)
     
     def _detect_content_type(self, message: str) -> str:
         """Detect the type of content in the message"""
@@ -182,10 +190,13 @@ class MessageSplitter:
         parts = []
         sentences = self._split_by_sentences(message)
         
+        # Limit the number of parts to avoid spam
+        max_parts = 3  # Maximum 3 parts to prevent spammy feel
+        
         current_part = ""
         current_type = "teasing"
         
-        for sentence in sentences:
+        for i, sentence in enumerate(sentences):
             sentence = sentence.strip()
             if not sentence:
                 continue
@@ -193,8 +204,13 @@ class MessageSplitter:
             # Determine sentence type
             sentence_type = self._classify_sentence(sentence)
             
+            # If we're at the max parts limit, combine remaining sentences
+            if len(parts) >= max_parts - 1:
+                current_part += " " + sentence if current_part else sentence
+                continue
+            
             # If type changes or part gets too long, start new part
-            if (sentence_type != current_type and current_part) or len(current_part) > 200:
+            if (sentence_type != current_type and current_part) or len(current_part) > 150:
                 if current_part:
                     # Clean up the part to ensure proper punctuation and emoji placement
                     cleaned_part = self._clean_message_part(current_part.strip())
@@ -221,6 +237,20 @@ class MessageSplitter:
         if not parts:
             cleaned_message = self._clean_message_part(message)
             parts.append(MessagePart(content=cleaned_message, type='complete', delay=0.0))
+        
+        # If we have too many parts, combine some
+        if len(parts) > max_parts:
+            # Combine middle parts
+            combined_parts = [parts[0]]  # Keep first part
+            middle_content = " ".join([part.content for part in parts[1:-1]])
+            if middle_content:
+                combined_parts.append(MessagePart(
+                    content=self._clean_message_part(middle_content),
+                    type="complete",
+                    delay=delay_map.get("complete", 2.0)
+                ))
+            combined_parts.append(parts[-1])  # Keep last part
+            parts = combined_parts
         
         return parts
     
@@ -353,6 +383,75 @@ class MessageSplitter:
             "complete": 0.0    # No delay for complete messages
         }
         return delays.get(message_type, 2.0)
+    
+    def _rephrase_long_message(self, message: str) -> str:
+        """Rephrase long messages to be more concise and less repetitive"""
+        # Split into sentences
+        sentences = self._split_by_sentences(message)
+        
+        # Remove repetitive patterns
+        unique_sentences = []
+        seen_patterns = set()
+        
+        for sentence in sentences:
+            # Create a pattern signature to detect repetition
+            pattern = self._create_sentence_pattern(sentence)
+            if pattern not in seen_patterns:
+                unique_sentences.append(sentence)
+                seen_patterns.add(pattern)
+        
+        # If we removed too many sentences, keep the most important ones
+        if len(unique_sentences) < len(sentences) * 0.5:
+            # Keep first, middle, and last sentences
+            if len(sentences) >= 3:
+                important_indices = [0, len(sentences)//2, -1]
+                unique_sentences = [sentences[i] for i in important_indices if i < len(sentences)]
+            else:
+                unique_sentences = sentences[:2]  # Keep first two
+        
+        # Join back together
+        rephrased = ' '.join(unique_sentences)
+        
+        # Ensure it's not too short
+        if len(rephrased) < 100:
+            return message  # Return original if rephrasing made it too short
+        
+        return rephrased
+    
+    def _create_sentence_pattern(self, sentence: str) -> str:
+        """Create a pattern signature for a sentence to detect repetition"""
+        # Remove specific words and keep structure
+        pattern = sentence.lower()
+        # Remove common filler words
+        filler_words = ['baby', 'sweetie', 'honey', 'love', 'dear', 'oh', 'mm', 'hmm']
+        for word in filler_words:
+            pattern = pattern.replace(word, '')
+        # Remove punctuation and extra spaces
+        pattern = re.sub(r'[^\w\s]', '', pattern)
+        pattern = re.sub(r'\s+', ' ', pattern).strip()
+        return pattern
+    
+    def _has_natural_split_points(self, message: str) -> bool:
+        """Check if message has natural points where it can be split"""
+        # Count different types of sentence endings
+        question_count = message.count('?')
+        exclamation_count = message.count('!')
+        period_count = message.count('.')
+        
+        # Need at least 2 different sentence types or 3+ sentences
+        total_sentences = question_count + exclamation_count + period_count
+        
+        # Check for natural breaks
+        natural_breaks = [
+            'but', 'however', 'though', 'although', 'meanwhile', 
+            'then', 'next', 'after', 'before', 'while', 'when',
+            'so', 'therefore', 'thus', 'hence', 'consequently'
+        ]
+        
+        has_breaks = any(break_word in message.lower() for break_word in natural_breaks)
+        
+        # Split if we have multiple sentences OR natural breaks
+        return total_sentences >= 2 or (total_sentences >= 1 and has_breaks)
     
     def format_for_streaming(self, parts: List[MessagePart]) -> List[Dict[str, Any]]:
         """Format message parts for streaming API"""
