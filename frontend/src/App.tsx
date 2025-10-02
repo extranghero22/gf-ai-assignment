@@ -20,7 +20,6 @@ const App: React.FC = () => {
   const [metrics, setMetrics] = useState<any>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentStreamingMessage, setCurrentStreamingMessage] = useState<string>('');
-  const [streamingParts, setStreamingParts] = useState<string[]>([]);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -96,7 +95,6 @@ const App: React.FC = () => {
 
       // Use streaming API for multi-message typing simulation
       console.log('Starting streaming request...');
-      let messageParts: string[] = [];
       
       await conversationApi.sendMessageStream(
         content,
@@ -116,11 +114,14 @@ const App: React.FC = () => {
                                      content.length < 20; // Only filter if it's a short standalone indicator
             
             if (!isTypingIndicator && content.length > 0) {
-              // Add message part to array
-              console.log('Adding message part:', part.content);
-              messageParts.push(part.content);
-              setStreamingParts([...messageParts]);
-              console.log('Updated streaming parts:', messageParts);
+              // Add message part immediately as a separate message
+              console.log('Adding message part as separate message:', part.content);
+              const newMessage: Message = {
+                role: 'agent',
+                content: part.content,
+                timestamp: Date.now() / 1000,
+              };
+              setMessages(prev => [...prev, newMessage]);
             } else {
               console.log('Filtered out typing indicator:', part.content);
             }
@@ -129,16 +130,6 @@ const App: React.FC = () => {
         // onComplete
         (complete: StreamComplete) => {
           console.log('Stream completed:', complete);
-          // Add all message parts as sequential messages for anticipation building
-          if (messageParts.length > 0) {
-            console.log('Adding message parts as sequential messages:', messageParts);
-            const newMessages: Message[] = messageParts.map((part, index) => ({
-              role: 'agent' as const,
-              content: part,
-              timestamp: Date.now() / 1000 + index * 0.1, // Slight delay for ordering
-            }));
-            setMessages(prev => [...prev, ...newMessages]);
-          }
           
           // Update energy flags
           if (complete.energy_status) {
@@ -147,7 +138,6 @@ const App: React.FC = () => {
           
           setIsStreaming(false);
           setCurrentStreamingMessage('');
-          setStreamingParts([]);
         },
         // onError
         (error: StreamError) => {
@@ -155,7 +145,6 @@ const App: React.FC = () => {
           setError(error.message);
           setIsStreaming(false);
           setCurrentStreamingMessage('');
-          setStreamingParts([]);
         }
       );
 
@@ -213,29 +202,15 @@ const App: React.FC = () => {
               />
             ))}
             
-            {isStreaming && (
-              <div className="streaming-message">
-                <div className="typing-indicator">
-                  <span></span>
-                  <span></span>
-                  <span></span>
+            {isStreaming && currentStreamingMessage && (
+              <div className="message agent-message">
+                <div className="message-header">
+                  <span className="message-role">AI Girlfriend</span>
+                  <span className="message-time">{new Date().toLocaleTimeString()}</span>
                 </div>
-                <div className="streaming-content">
-                  {currentStreamingMessage && (
-                    <div className="message agent-message">
-                      <div className="message-content">
-                        {currentStreamingMessage}
-                        <span className="cursor">|</span>
-                      </div>
-                    </div>
-                  )}
-                  {streamingParts.map((part, index) => (
-                    <div key={index} className="message agent-message">
-                      <div className="message-content">
-                        {part}
-                      </div>
-                    </div>
-                  ))}
+                <div className="message-content">
+                  {currentStreamingMessage}
+                  <span className="cursor">|</span>
                 </div>
               </div>
             )}
