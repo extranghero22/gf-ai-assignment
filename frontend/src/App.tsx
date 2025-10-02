@@ -20,6 +20,8 @@ const App: React.FC = () => {
   const [metrics, setMetrics] = useState<any>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentStreamingMessage, setCurrentStreamingMessage] = useState<string>('');
+  const [isTyping, setIsTyping] = useState(false);
+  const [pendingMessages, setPendingMessages] = useState<string[]>([]);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -30,6 +32,40 @@ const App: React.FC = () => {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Effect to handle pending messages with typing simulation
+  useEffect(() => {
+    if (pendingMessages.length > 0) {
+      let currentIndex = 0;
+      
+      const showNextMessage = () => {
+        if (currentIndex < pendingMessages.length) {
+          const message = pendingMessages[currentIndex];
+          
+          // Add the message to the chat
+          const newMessage: Message = {
+            role: 'agent',
+            content: message,
+            timestamp: Date.now() / 1000,
+          };
+          setMessages(prev => [...prev, newMessage]);
+          
+          currentIndex++;
+          
+          // If there are more messages, continue typing
+          if (currentIndex < pendingMessages.length) {
+            setTimeout(showNextMessage, 1500 + Math.random() * 1000); // 1.5-2.5 second delay
+          } else {
+            setIsTyping(false);
+            setPendingMessages([]); // Clear pending messages
+          }
+        }
+      };
+
+      // Start showing messages after a brief delay
+      setTimeout(showNextMessage, 800 + Math.random() * 700); // 0.8-1.5 second initial delay
+    }
+  }, [pendingMessages.length]); // Only depend on length, not the array itself
 
   const startConversation = async () => {
     try {
@@ -91,10 +127,13 @@ const App: React.FC = () => {
     try {
       setIsStreaming(true);
       setCurrentStreamingMessage('');
+      setIsTyping(true);
+      setPendingMessages([]);
       setError(null);
 
       // Use streaming API for multi-message typing simulation
       console.log('Starting streaming request...');
+      let collectedMessages: string[] = [];
       
       await conversationApi.sendMessageStream(
         content,
@@ -114,14 +153,9 @@ const App: React.FC = () => {
                                      content.length < 20; // Only filter if it's a short standalone indicator
             
             if (!isTypingIndicator && content.length > 0) {
-              // Add message part immediately as a separate message
-              console.log('Adding message part as separate message:', part.content);
-              const newMessage: Message = {
-                role: 'agent',
-                content: part.content,
-                timestamp: Date.now() / 1000,
-              };
-              setMessages(prev => [...prev, newMessage]);
+              // Collect message parts for delayed display
+              console.log('Collecting message part:', part.content);
+              collectedMessages.push(part.content);
             } else {
               console.log('Filtered out typing indicator:', part.content);
             }
@@ -136,6 +170,14 @@ const App: React.FC = () => {
             setCurrentEnergyFlags(complete.energy_status);
           }
           
+          // Start the typing simulation with collected messages
+          if (collectedMessages.length > 0) {
+            console.log('Starting typing simulation with messages:', collectedMessages);
+            setPendingMessages(collectedMessages);
+          } else {
+            setIsTyping(false);
+          }
+          
           setIsStreaming(false);
           setCurrentStreamingMessage('');
         },
@@ -145,6 +187,8 @@ const App: React.FC = () => {
           setError(error.message);
           setIsStreaming(false);
           setCurrentStreamingMessage('');
+          setIsTyping(false);
+          setPendingMessages([]);
         }
       );
 
@@ -202,15 +246,19 @@ const App: React.FC = () => {
               />
             ))}
             
-            {isStreaming && currentStreamingMessage && (
+            {isTyping && (
               <div className="message agent-message">
                 <div className="message-header">
                   <span className="message-role">AI Girlfriend</span>
                   <span className="message-time">{new Date().toLocaleTimeString()}</span>
                 </div>
-                <div className="message-content">
-                  {currentStreamingMessage}
-                  <span className="cursor">|</span>
+                <div className="message-content typing-indicator-content">
+                  <div className="typing-indicator">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                  </div>
+                  <span className="typing-text">typing...</span>
                 </div>
               </div>
             )}
