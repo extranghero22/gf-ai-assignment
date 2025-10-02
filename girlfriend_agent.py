@@ -10,6 +10,7 @@ from typing import Tuple, List, Optional, Callable
 from energy_types import EnergySignature, EnergyLevel
 from conversation_context import ConversationContext
 from dataset_loader import DatasetLoader
+from ai_error_logger import log_ai_error, log_conversation_disconnect, log_api_error, log_fallback_used, log_response_quality_issue, ErrorCategory, ErrorSeverity
 
 class EnergyAwareGirlfriendAgent:
     """Dominant girlfriend agent with explicit personality that adapts to safety status"""
@@ -91,14 +92,23 @@ class EnergyAwareGirlfriendAgent:
         """Generate safety-gated explicit response using Gemini"""
 
         # Fast-path for simple greetings to avoid LLM calls
-        simple_greetings = ["hi", "hello", "hey", "good morning", "good night", "how are you"]
-        is_simple_greeting = any(greeting in user_message.lower() for greeting in simple_greetings)
+        # Use word boundaries to prevent false matches (e.g., "tell" matching "hi")
+        simple_greetings_patterns = [
+            r'\bhi\b', r'\bhello\b', r'\bhey\b', 
+            r'\bgood morning\b', r'\bgood night\b', r'\bhow are you\b'
+        ]
+        import re
+        is_simple_greeting = any(
+            re.search(pattern, user_message.lower()) 
+            for pattern in simple_greetings_patterns
+        ) and len(user_message.split()) <= 3  # Only for very short messages
         
-        if is_simple_greeting and safety_status == "green":
-            # Return immediate response for simple greetings
+        # ONLY use fast path for very simple greetings AND only at conversation start
+        if is_simple_greeting and safety_status == "green" and len(context.messages) < 2:
+            # Return immediate response for simple greetings ONLY at conversation start
             responses = [
                 "Hey baby! How are you doing today?",
-                "Hi sweetheart! What's on your mind?",
+                "Hi sweetheart! What's on your mind?", 
                 "Hey there! I've been thinking about you.",
                 "Hello beautiful! How's your day going?"
             ]
@@ -117,6 +127,16 @@ class EnergyAwareGirlfriendAgent:
                 intensity_score=0.5,
                 confidence=0.9
             )
+            
+            # Log that we used the fast greeting function
+            log_ai_error(
+                category=ErrorCategory.FALLBACK_USED,
+                severity=ErrorSeverity.LOW,
+                message=f"Fast greeting used for simple message: '{user_message}'",
+                user_message=user_message,
+                context={"fast_greeting": True, "conversation_length": len(context.messages)}
+            )
+            
             return quick_response, response_energy
 
         # Update safety status in context
@@ -163,6 +183,19 @@ class EnergyAwareGirlfriendAgent:
                     
             except Exception as e:
                 print(f"⚠️ Mistral API error with {current_model}: {e}")
+                
+                # Log API error
+                log_api_error(
+                    model=current_model,
+                    error=e,
+                    user_message=user_message,
+                    context={
+                        'attempt': attempt + 1,
+                        'total_models': len(self.model_options),
+                        'prompt_length': len(prompt)
+                    }
+                )
+                
                 if "capacity exceeded" in str(e).lower() or "3505" in str(e):
                     print(f"🔄 Model {current_model} capacity exceeded, trying next model...")
                     continue
@@ -173,12 +206,255 @@ class EnergyAwareGirlfriendAgent:
         # If all models failed, use fallback
         if not generated_response:
             print("⚠️ All Mistral models failed, using context-aware fallback")
+            
+            # Log fallback usage
+            log_fallback_used(
+                reason="All Mistral models failed",
+                user_message=user_message,
+                context={
+                    'models_tried': self.model_options,
+                    'conversation_length': len(context.messages) if context else 0
+                }
+            )
+            
             generated_response = self._get_context_aware_fallback(user_message, context)
 
-        # Analyze response energy
-        response_energy = await self.energy_analyzer.analyze_message_energy(generated_response)
+        # Apply response moderation
+        moderated_response = self._moderate_response(generated_response, user_message, safety_status)
+        
+        # Log if response was moderated
+        if moderated_response != generated_response:
+            log_ai_error(
+                category=ErrorCategory.RESPONSE_QUALITY,
+                severity=ErrorSeverity.LOW,
+                message="Response was moderated for length/intensity",
+                context={
+                    "original_length": len(generated_response),
+                    "moderated_length": len(moderated_response),
+                    "moderation_reason": "Length/intensity control"
+                }
+            )
 
-        return generated_response, response_energy
+        # Analyze response energy
+        response_energy = await self.energy_analyzer.analyze_message_energy(moderated_response)
+
+        # Check for conversation disconnect
+        self._check_conversation_disconnect(user_message, moderated_response, context)
+
+        return moderated_response, response_energy
+
+    def _moderate_response(self, response: str, user_message: str, safety_status: str) -> str:
+        """Moderate response length and intensity based on context"""
+        
+        # Define length limits based on context
+        length_limits = {
+            "green": 300,   # Moderate limit for sexual/intimate content
+            "yellow": 200, # Smaller limit for cautionary content  
+            "red": 150     # Short limit for restricted content
+        }
+        
+        max_length = length_limits.get(safety_status, 250)
+        
+        # Check if response is too long
+        if len(response) > max_length:
+            # Try to find a natural breaking point (sentence, paragraph, or instruction end)
+            break_points = ['.', '!', '?', '\n\n', '😘', '❤️', '🥵']
+            
+            truncated = response[:max_length]
+            
+            # Find the last natural break point
+            for break_char in break_points:
+                last_break = truncated.rfind(break_char)
+                if last_break > max_length * 0.7:  # Don't truncate too much
+                    truncated = truncated[:last_break + 1]
+                    break
+            
+            # If truncated too much, use basic cut with ellipsis
+            if len(truncated) < max_length * 0.5:
+                truncated = response[:max_length-10] + "..."
+            
+            # Add graceful ending if it was truncated
+            if not truncated.endswith(('.', '!', '?', '😘', '❤️', '🥵')):
+                truncated += " 😘"
+            
+            return truncated
+        
+        # Check for excessive emoji use (more than 5 emojis in explicit content)
+        if safety_status == "green":
+            emoji_count = sum(1 for char in response if ord(char) > 127)  # Unicode characters
+            if emoji_count > 5:
+                # Reduce emoji count by removing some excess ones
+                import re
+                emoji_pattern = r'[😈🔥😘❤️💕🥵🤭😍💦🎯🔥😇💝💋]'
+                emojis = re.findall(emoji_pattern, response)
+                
+                if len(emojis) > 5:
+                    # Keep first 5 emojis, remove duplicate ones
+                    used_emojis = set()
+                    emoji_count = 0
+                    new_response = response
+                    
+                    for emoji in emojis:
+                        if emoji not in used_emojis and emoji_count < 5:
+                            used_emojis.add(emoji)
+                            emoji_count += 1
+                        elif emoji_count >= 5:
+                            new_response = new_response.replace(emoji, '', 1)  # Remove first occurrence
+                    
+                    return new_response
+        
+        return response
+
+    def _check_conversation_disconnect(self, user_message: str, ai_response: str, context: ConversationContext):
+        """Check for conversation disconnect and log if detected"""
+        
+        # Only check if there's conversation history
+        if not context.messages or len(context.messages) < 2:
+            return
+        
+        # Get the last user message from history
+        last_user_message = None
+        for msg in reversed(context.messages):
+            if msg.get('role') == 'user':
+                last_user_message = msg.get('content', '')
+                break
+        
+        if not last_user_message:
+            return
+        
+        # Check for sexual content in recent messages
+        sexual_keywords = ["horny", "hard", "wet", "aroused", "turned on", "want you", "need you", 
+                          "touch me", "kiss me", "fuck", "sex ", "cum", "orgasm", "pleasure", "desire", 
+                          "lust", "naughty", "dirty", "intimate", "make love", "seduce", "tease", 
+                          "flirt", "fantasy", "dream about you", "think about you sexually", "mommy",
+                          "teasing", "satisfied", "take care of you"]
+        
+        recent_sexual_content = any(
+            keyword in msg.get('content', '').lower() 
+            for msg in context.messages[-4:]  # Check last 4 messages
+            for keyword in sexual_keywords
+        )
+        
+        # Check for topic transition (sexual to casual)
+        casual_keywords = ["hiking", "walk", "food", "movie", "game", "work", "school", "weather", 
+                          "news", "sports", "music", "book", "art", "travel", "shopping", "restaurant",
+                          "park", "beach", "mountains", "camping", "running", "swimming"]
+        user_topic_shift = any(keyword in user_message.lower() for keyword in casual_keywords)
+        
+        # Check for disconnect indicators
+        disconnect_indicators = [
+            # Generic greetings when there's context
+            ai_response.lower().startswith(('hey baby! how are you doing today?', 
+                                          'hi sweetheart! what\'s on your mind?',
+                                          'hello beautiful! how\'s your day going?',
+                                          'hey there! i\'ve been thinking about you.')),
+            
+            # Not referencing previous conversation
+            not any(keyword in ai_response.lower() for keyword in [
+                'you said', 'you mentioned', 'you asked', 'you told me',
+                'earlier', 'before', 'just now', 'you were', 'you seem',
+                'i heard', 'i noticed', 'i can see', 'i understand'
+            ]),
+            
+            # Complete topic change without acknowledgment
+            len(ai_response) > 20 and not any(
+                word in ai_response.lower() for word in 
+                last_user_message.lower().split()[:5]  # First 5 words of user message
+            )
+        ]
+        
+        # Special detection for sexual-to-casual transitions
+        topic_transition_disconnect = (
+            recent_sexual_content and 
+            user_topic_shift and 
+            disconnect_indicators[1]  # No reference to previous conversation
+        )
+        
+           # Check for script repetition pattern (AI repeating earlier messages)
+           script_repetition = False
+           if len(context.messages) >= 4:
+               # Get recent AI messages (excluding current response)
+               recent_ai_messages = [
+                   msg.get('content', '') for msg in context.messages[-6:]
+                   if msg.get('role') == 'assistant'
+               ]
+               
+               if len(recent_ai_messages) >= 2:
+                   # Check if current response repeats phrases from recent messages
+                   current_words = set(ai_response.lower().split())
+                   current_content = ai_response.lower()
+                   
+                   for prev_msg in recent_ai_messages[:-1]:  # Exclude the immediate previous
+                       prev_words = set(prev_msg.lower().split())
+                       prev_content = prev_msg.lower()
+                       
+                       # Check for significant phrase repetition
+                       common_words = len(current_words & prev_words)
+                       overlap_ratio = common_words / len(current_words) if len(current_words) > 0 else 0
+                       
+                       # Additional check for exact phrase repetition
+                       exact_phrase_match = False
+                       if len(prev_content.split()) > 5:  # Only check if previous message has substance
+                           prev_phrases = prev_content.split()
+                           curr_phrases = current_content.split()
+                           # Check for 5+ consecutive word overlap (phrase repetition)
+                           for i in range(len(curr_phrases) - 4):
+                               curr_phrase = ' '.join(curr_phrases[i:i+5])
+                               if curr_phrase in ' '.join(prev_phrases):
+                                   exact_phrase_match = True
+                       else:
+                           phrase_similarity = (common_words / min(len(current_words), len(prev_words))) > 0.6
+                       
+                       if (len(current_words | prev_words) > 10 and overlap_ratio > 0.4) or exact_phrase_match:
+                           script_repetition = True
+                           break
+
+           # If multiple indicators are present, it's likely a disconnect
+           if sum(disconnect_indicators) >= 2 or topic_transition_disconnect or script_repetition:
+            error_context = {
+                'disconnect_indicators': {
+                    'generic_greeting': disconnect_indicators[0],
+                    'no_reference': disconnect_indicators[1],
+                    'topic_change': disconnect_indicators[2]
+                },
+                'last_user_message': last_user_message,
+                   'conversation_length': len(context.messages),
+                   'has_recent_sexual_content': recent_sexual_content,
+                   'user_topic_shift': user_topic_shift,
+                   'topic_transition_disconnect': topic_transition_disconnect,
+                   'script_repetition_detected': script_repetition,
+                'timing_analysis': {
+                    'rapid_message_flag': len(context.messages) >= 2 and 
+                    any('timestamp' in msg for msg in context.messages[-2:]),
+                    'fast_computation_hypothesis': True
+                }
+            }
+            
+               # Determine the specific issue type
+               if script_repetition:
+                   issue_type = "Script repetition detected: AI repeating earlier messages instead of responding dynamically"
+                   severity = ErrorSeverity.HIGH
+               elif topic_transition_disconnect:
+                   issue_type = "Topic transition disconnect: Sexual to casual - AI struggles with rapid topic changes"
+                   severity = ErrorSeverity.HIGH
+               else:
+                   issue_type = "Response ignores conversation context"
+                   severity = ErrorSeverity.MEDIUM
+            
+            log_conversation_disconnect(
+                user_message=user_message,
+                ai_response=ai_response,
+                conversation_history=context.messages[-6:],  # Last 6 messages
+                context=error_context
+            )
+            
+            # Also log as response quality issue with specific detail
+            log_response_quality_issue(
+                user_message=user_message,
+                ai_response=ai_response,
+                issue_description=f"{issue_type}: {ai_response[:100]}",
+                conversation_history=context.messages[-6:]
+            )
 
     def _get_context_aware_fallback(self, user_message: str, context: ConversationContext) -> str:
         """Get a context-aware fallback response based on user message content"""

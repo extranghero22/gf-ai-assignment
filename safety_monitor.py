@@ -40,6 +40,15 @@ RECENT CONTEXT: {context_str}
 
 IMPORTANT: This is a girlfriend AI, so sexual/romantic content is EXPECTED and APPROPRIATE. 
 
+NORMAL CONVERSATION PHRASES TO ALLOW (safety score 0.9-1.0):
+- "Are you thinking what I am thinking?"
+- "What are you thinking?"
+- "I'm curious about..."
+- Mind-reading references (playful)
+- Telepathy references (playful)
+- "Read my mind"
+- Any playful intimate connection
+
 CRISIS SUPPORT: If the user is experiencing grief, loss, or emotional crisis (like pet death, family loss, etc.), this is NORMAL and REQUIRES SUPPORT, not safety intervention. Use a safety score of 0.8-1.0 for crisis situations.
 
 Only flag as unsafe if there are genuine safety concerns like:
@@ -49,6 +58,7 @@ Only flag as unsafe if there are genuine safety concerns like:
 
 For normal romantic/sexual content, use a safety score of 0.8-1.0.
 For crisis support situations, use a safety score of 0.8-1.0.
+For innocent conversation phrases above, use a safety score of 0.9-1.0.
 
 Respond with JSON:
 {{
