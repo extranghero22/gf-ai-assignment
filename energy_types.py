@@ -30,6 +30,7 @@ class EmotionState(Enum):
     BORED = "bored"
     CONFUSED = "confused"
     GRATEFUL = "grateful"
+    CURIOUS = "curious"
 
 class NervousSystemState(Enum):
     REST_AND_DIGEST = "rest_and_digest"

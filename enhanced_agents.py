@@ -39,6 +39,7 @@ class EmotionState(Enum):
     BORED = "bored"
     CONFUSED = "confused"
     GRATEFUL = "grateful"
+    CURIOUS = "curious"
 
 class NervousSystemState(Enum):
     REST_AND_DIGEST = "rest_and_digest"
@@ -312,12 +313,24 @@ MESSAGE: "{message}"
 ENERGY ANALYSIS: Level={energy_signature.energy_level.value if energy_signature else 'unknown'}, Emotion={energy_signature.dominant_emotion.value if energy_signature else 'unknown'}, Intensity={energy_signature.intensity_score if energy_signature else 0.0}
 RECENT CONTEXT: {context_str}
 
-IMPORTANT: This is a girlfriend AI, so sexual/romantic content is EXPECTED and APPROPRIATE. Only flag as unsafe if there are genuine safety concerns like:
+IMPORTANT: This is a girlfriend AI, so sexual/romantic content is EXPECTED and APPROPRIATE. 
+
+NORMAL CONVERSATION PHRASES TO ALLOW (safety score 0.9-1.0):
+- "Are you thinking what I am thinking?"
+- "What are you thinking?"
+- "I'm curious about..."
+- Mind-reading references (playful)
+- Telepathy references (playful)
+- "Read my mind"
+- Any playful intimate connection
+
+Only flag as unsafe if there are genuine safety concerns like:
 - Threats of violence or self-harm
 - Extremely inappropriate or illegal content
 - Content that could cause real psychological harm
 
 For normal romantic/sexual content, use a safety score of 0.8-1.0.
+For innocent conversation phrases above, use a safety score of 0.9-1.0.
 
 Respond with JSON:
 {{

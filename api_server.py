@@ -12,6 +12,7 @@ import random
 from enhanced_main import get_conversation_system
 from typing_simulator import MultiMessageGenerator
 from message_splitter import MessageSplitter
+from ai_error_logger import log_ai_error, ErrorCategory, ErrorSeverity
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for React frontend
@@ -83,6 +84,13 @@ def run_conversation_async():
         loop.run_until_complete(get_conversation_system().start_new_session())
     except Exception as e:
         print(f"Conversation error: {e}")
+        log_ai_error(
+            category=ErrorCategory.API_ERROR,
+            severity=ErrorSeverity.HIGH,
+            message=f"Conversation system startup failed: {str(e)}",
+            context={'function': 'run_conversation_async'},
+            exception=e
+        )
     finally:
         conversation_running = False
 
@@ -152,6 +160,14 @@ def send_message():
         
     except Exception as e:
         print(f"Message processing error: {e}")
+        log_ai_error(
+            category=ErrorCategory.API_ERROR,
+            severity=ErrorSeverity.MEDIUM,
+            message=f"Message processing failed: {str(e)}",
+            context={'endpoint': '/api/send', 'message': message},
+            user_message=message,
+            exception=e
+        )
         return jsonify({"error": str(e)})
 
 @app.route('/api/send-stream', methods=['POST'])
@@ -182,6 +198,16 @@ def send_message_stream():
                 # Return error if processing fails
                 error_data = {"type": "error", "message": f"Processing error: {str(e)}"}
                 yield f"data: {json.dumps(error_data)}\n\n"
+                
+                # Log the error
+                log_ai_error(
+                    category=ErrorCategory.API_ERROR,
+                    severity=ErrorSeverity.MEDIUM,
+                    message=f"Stream processing failed: {str(e)}",
+                    context={'endpoint': '/api/send-stream', 'message': message},
+                    user_message=message,
+                    exception=e
+                )
                 return
             
             # Get the last message from the conversation context
@@ -288,6 +314,24 @@ def get_metrics():
 def health_check():
     """Health check endpoint"""
     return jsonify({"status": "healthy", "timestamp": time.time()})
+
+@app.route('/api/errors', methods=['GET'])
+def get_error_statistics():
+    """Get AI error statistics and recent errors"""
+    try:
+        from ai_error_logger import get_error_statistics, get_recent_errors
+        
+        stats = get_error_statistics()
+        recent_errors = get_recent_errors(limit=20)
+        
+        return jsonify({
+            "statistics": stats,
+            "recent_errors": recent_errors,
+            "timestamp": time.time()
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)})
 
 if __name__ == '__main__':
     print("Starting Flask API server...")
