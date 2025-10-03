@@ -19,7 +19,7 @@ export interface Message {
 }
 
 export interface EnergyFlags {
-  status: 'green' | 'yellow' | 'red';
+  status: 'green' | 'yellow' | 'red' | 'sexual' | 'casual' | 'teasing';
   reason: string;
 }
 

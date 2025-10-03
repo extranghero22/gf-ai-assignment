@@ -104,11 +104,11 @@ Respond with JSON:
                     return self._get_safety_fallback()
 
     def _get_safety_fallback(self) -> Dict[str, Any]:
-        """Fallback safety analysis"""
+        """Fallback safety analysis - when API fails, assume safe to avoid blocking legitimate conversations"""
         return {
-            "safety_score": 0.8,
+            "safety_score": 0.0,  # 0.0 = safe, 1.0 = dangerous (lower is better)
             "issues": [],
             "risk_factors": [],
             "recommendation": "SAFE",
-            "reasoning": "Analysis failed, defaulting to safe"
+            "reasoning": "Safety analysis API unavailable - defaulting to safe to allow conversation"
         }

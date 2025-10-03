@@ -7,6 +7,8 @@ import ChatInput from './components/ChatInput';
 import EnergyIndicator from './components/EnergyIndicator';
 import SessionControls from './components/SessionControls';
 import MetricsModal from './components/MetricsModal';
+import CharacterSprite from './components/CharacterSprite';
+import CrisisToast from './components/CrisisToast';
 import './App.css';
 
 const App: React.FC = () => {
@@ -17,6 +19,8 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showMetrics, setShowMetrics] = useState(false);
+  const [showCrisisToast, setShowCrisisToast] = useState(false);
+  const [crisisToastReason, setCrisisToastReason] = useState<string>('');
   const [metrics, setMetrics] = useState<any>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentStreamingMessage, setCurrentStreamingMessage] = useState<string>('');
@@ -168,6 +172,15 @@ const App: React.FC = () => {
           // Update energy flags
           if (complete.energy_status) {
             setCurrentEnergyFlags(complete.energy_status);
+            
+            // Check for crisis situation and show alert
+            if (complete.energy_status.status === 'red' && 
+                (complete.energy_status.reason.includes('crisis') || 
+                 complete.energy_status.reason.includes('mental health') ||
+                 complete.energy_status.reason.includes('extreme sadness'))) {
+              setCrisisToastReason(complete.energy_status.reason);
+              setShowCrisisToast(true);
+            }
           }
           
           // Start the typing simulation with collected messages
@@ -219,6 +232,14 @@ const App: React.FC = () => {
       </header>
 
       <main className="app-main">
+        {/* Character Sprite Section */}
+        <CharacterSprite 
+          energyFlags={currentEnergyFlags}
+          isTyping={isTyping}
+          isActive={isActive}
+          messageCount={messages.length}
+        />
+
         <div className="chat-container">
           <div className="chat-header">
             <SessionControls
@@ -272,6 +293,16 @@ const App: React.FC = () => {
               <button onClick={() => setError(null)}>✕</button>
             </div>
           )}
+
+          {/* Crisis Alert Toast */}
+          <CrisisToast 
+            show={showCrisisToast}
+            reason={crisisToastReason}
+            onClose={() => {
+              setShowCrisisToast(false);
+              setCrisisToastReason('');
+            }}
+          />
 
           <div className="chat-input-container">
             <ChatInput

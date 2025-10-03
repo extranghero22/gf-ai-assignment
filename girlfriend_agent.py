@@ -87,37 +87,8 @@ class EnergyAwareGirlfriendAgent:
         }
 
     async def generate_response(self, context: ConversationContext,
-                               user_message: str, safety_status: str = "green") -> Tuple[str, EnergySignature]:
+                              user_message: str, safety_status: str = "green") -> Tuple[str, EnergySignature]:
         """Generate safety-gated explicit response using Gemini"""
-
-        # Fast-path for simple greetings to avoid LLM calls
-        simple_greetings = ["hi", "hello", "hey", "good morning", "good night", "how are you"]
-        is_simple_greeting = any(greeting in user_message.lower() for greeting in simple_greetings)
-        
-        if is_simple_greeting and safety_status == "green":
-            # Return immediate response for simple greetings
-            responses = [
-                "Hey baby! How are you doing today?",
-                "Hi sweetheart! What's on your mind?",
-                "Hey there! I've been thinking about you.",
-                "Hello beautiful! How's your day going?"
-            ]
-            import random
-            quick_response = random.choice(responses)
-            
-            # Create a simple energy signature for the response
-            from energy_types import EnergySignature, EnergyLevel, EnergyType, EmotionState, NervousSystemState
-            import time
-            response_energy = EnergySignature(
-                timestamp=time.time(),
-                energy_level=EnergyLevel.MEDIUM,
-                energy_type=EnergyType.COOPERATIVE,
-                dominant_emotion=EmotionState.HAPPY,
-                nervous_system_state=NervousSystemState.REST_AND_DIGEST,
-                intensity_score=0.5,
-                confidence=0.9
-            )
-            return quick_response, response_energy
 
         # Update safety status in context
         context.safety_status = safety_status
@@ -186,7 +157,7 @@ class EnergyAwareGirlfriendAgent:
         # Detect sexual context for fallback
         sexual_keywords = ["horny", "hard", "wet", "aroused", "turned on", "want you", "need you", "touch me", "kiss me", 
                           "fuck", "sex", "cum", "orgasm", "pleasure", "desire", "lust", "naughty", "dirty", "intimate",
-                          "make love", "seduce", "tease", "flirt", "fantasy", "dream about you", "think about you sexually"]
+                          "make love", "seduce", "tease", "flirt", "fantasy", "dream about you", "think about you sexually",]
         is_sexual = any(keyword in user_message.lower() for keyword in sexual_keywords)
         
         # Detect emotional context
@@ -292,20 +263,27 @@ class EnergyAwareGirlfriendAgent:
         emotional_keywords = ["lonely", "sad", "love", "miss", "hurt", "cry", "depressed", "anxious", "scared", "worried"]
         is_emotional_message = any(keyword in user_message.lower() for keyword in emotional_keywords)
         
-        # Sexual tension detection
-        sexual_keywords = ["horny", "hard", "wet", "aroused", "turned on", "want you", "need you", "touch me", "kiss me", 
-                          "fuck", "sex", "cum", "orgasm", "pleasure", "desire", "lust", "naughty", "dirty", "intimate",
-                          "make love", "seduce", "tease", "flirt", "fantasy", "dream about you", "think about you sexually"]
-        is_sexual_context = any(keyword in user_message.lower() for keyword in sexual_keywords)
+        # Sexual tension detection - TWO MODES (KEYWORD-BASED ONLY)
+        # Mode 1: Teasing keywords (playful/flirty but not explicit)
+        teasing_keywords = ["horny", "hard", "wet", "aroused", "turned on", "naughty", "dirty", 
+                           "desire", "want you", "need you", "seduce", "tease", "flirt"]
+        is_teasing_context = any(keyword in user_message.lower() for keyword in teasing_keywords)
         
-        # Check for sexual energy level too
-        if user_energy and user_energy.energy_level in [EnergyLevel.HIGH, EnergyLevel.INTENSE]:
-            if user_energy.energy_type.value in ["intimate", "playful"] and user_energy.intensity_score > 0.6:
-                is_sexual_context = True
+        # Mode 2: Explicit sexual keywords (full sexual responses)
+        explicit_sexual_keywords = ["fuck", "fuck me", "sex", "cum", "orgasm", "make me cum", 
+                                   "touch me", "kiss me", "make love", "pleasure", "lust", "intimate",
+                                   "fantasy", "dream about you sexually"]
+        is_sexual_context = any(keyword in user_message.lower() for keyword in explicit_sexual_keywords)
+        
+        # REMOVED: Energy-based sexual detection
+        # This was causing romantic messages like "you're the only one in my mind" to trigger sexual mode
+        # Now ONLY explicit keywords trigger sexual responses - user must be explicit
                 
         # Debug output
         if is_sexual_context:
             print(f"🔥 Sexual context detected in message: '{user_message[:50]}...'")
+        elif is_teasing_context:
+            print(f"😏 Teasing context detected in message: '{user_message[:50]}...'")
         else:
             print(f"💬 Regular context for message: '{user_message[:50]}...'")
         
@@ -326,6 +304,17 @@ class EnergyAwareGirlfriendAgent:
         # Personality instructions based on context
         if is_crisis:
             personality_instructions = "You are a caring girlfriend who talks exactly like the examples above. Be genuinely concerned and supportive. Keep responses natural and realistic."
+        elif is_teasing_context:
+            # TEASING MODE: Playful and flirty but NOT explicitly sexual
+            personality_instructions = """You are a playful, confident girlfriend who loves to tease but stays classy. 
+- Be flirty and suggestive but DON'T get explicitly sexual
+- Use playful language like "oh really? 😏", "someone's feeling bold today 🤭", "careful what you wish for babe 😉"
+- Tease them back but don't escalate to explicit sexual content
+- Keep it fun and lighthearted, making them want more
+- Match their energy but stay one step behind - make THEM escalate further
+- Think: flirty girlfriend, not explicit sexting
+- Examples: "mmm you think so? 😏", "oh baby you're being bold today 🤭", "hehe someone's feeling frisky 😉 what's gotten into you?", "oh really now? 👀 tell me more about that thought 😏"
+"""
         elif is_sexual_context and safety_status == "green":
             personality_instructions = """You are a dominant, instructional girlfriend who takes control and guides your partner. 
             - Use "mommy" as your preferred term of address
@@ -434,6 +423,7 @@ CRITICAL INSTRUCTIONS:
     - Focus on physical responses and feelings
     - Be both nurturing and demanding in your guidance
 17. Match the conversational style and emotional tone of the example responses
+18. IMPORTANT: Never use "P.S." or "PS" in your responses - avoid postscript-style additions
 
 Current user message: "{user_message}"
 
