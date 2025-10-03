@@ -114,11 +114,28 @@ Respond with a JSON object containing:
                 print(f"⚠️ No valid JSON found in response: '{response_text}'")
                 return self._rule_based_energy_analysis(message)
         
+        # Safely parse emotion state with fallback mapping
+        emotion_value = result["dominant_emotion"].lower()
+        emotion_mapping = {
+            "playful": "happy",  # Map playful to happy since playful is an energy type, not emotion
+            "flirty": "excited",
+            "romantic": "loving",
+            "neutral": "happy"
+        }
+        if emotion_value in emotion_mapping:
+            emotion_value = emotion_mapping[emotion_value]
+        
+        try:
+            dominant_emotion = EmotionState(emotion_value)
+        except ValueError:
+            print(f"⚠️ Invalid emotion '{emotion_value}', defaulting to 'happy'")
+            dominant_emotion = EmotionState.HAPPY
+        
         return EnergySignature(
             timestamp=time.time(),
             energy_level=EnergyLevel(result["energy_level"]),
             energy_type=EnergyType(result["energy_type"]),
-            dominant_emotion=EmotionState(result["dominant_emotion"]),
+            dominant_emotion=dominant_emotion,
             nervous_system_state=NervousSystemState(result["nervous_system_state"]),
             intensity_score=result["intensity_score"],
             confidence=result["confidence"]
