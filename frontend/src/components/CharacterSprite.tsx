@@ -9,7 +9,7 @@ interface CharacterSpriteProps {
   messageCount?: number; // Track total messages to determine progression
 }
 
-type OutfitType = 'casual' | 'casual_pullshirt' | 'casual_both' | 'comfy' | 'date' | 'overcoat_buttoned' | 'overcoat_open';
+type OutfitType = 'casual' | 'casual_pullshirt' | 'casual_both' | 'comfy' | 'date' | 'overcoat_buttoned' | 'overcoat_open_topless' | 'overcoat_nude';
 type ExpressionType = 'neutral' | 'happy' | 'smirk' | 'wink' | 'closed' | 'pout';
 
 const CharacterSprite: React.FC<CharacterSpriteProps> = ({ 
@@ -63,14 +63,18 @@ const CharacterSprite: React.FC<CharacterSpriteProps> = ({
         }
         
         // Check if this is exhibitionism script (overcoat outfit - NO ANIMATION)
+        // 3-stage progression: buttoned → open topless → fully nude
         if (scriptType === 'exhibitionism' || (reason && reason.toLowerCase().includes('public')) || (reason && reason.toLowerCase().includes('outside'))) {
-          // STATIC ONLY: Show buttoned coat longer, then open coat later
-          if (sexualMessageCount >= 5) {
-            console.log(`🔥 EXHIBIT SCRIPT: Message ${sexualMessageCount + 1} → OPEN COAT`);
-            setCurrentOutfit('overcoat_open');
+          // STATIC ONLY: Progressive reveal in 3 stages
+          if (sexualMessageCount >= 7) {
+            console.log(`🔥🔥 EXHIBIT SCRIPT: Message ${sexualMessageCount + 1} → FULLY NUDE`);
+            setCurrentOutfit('overcoat_nude'); // Stage 3: Fully exposed
+          } else if (sexualMessageCount >= 4) {
+            console.log(`🔥 EXHIBIT SCRIPT: Message ${sexualMessageCount + 1} → OPEN COAT TOPLESS`);
+            setCurrentOutfit('overcoat_open_topless'); // Stage 2: Coat open, topless
           } else {
             console.log(`🔒 EXHIBIT SCRIPT: Message ${sexualMessageCount + 1} → BUTTONED COAT`);
-            setCurrentOutfit('overcoat_buttoned');
+            setCurrentOutfit('overcoat_buttoned'); // Stage 1: Fully covered
           }
         } else {
           // Room script (casual wear)
@@ -169,12 +173,18 @@ const CharacterSprite: React.FC<CharacterSpriteProps> = ({
       case 'date':
         return `${basePath}/Date Wear/base.png`;
       case 'overcoat_buttoned':
-        // Use buttoned_coat.png - should be the proper closed coat
+        // Stage 1: Buttoned coat - fully covered
         const buttonedPath = `${basePath}/Overcoat/buttoned_coat.png`;
         console.log(`🔒 LOADING BUTTONED COAT: ${buttonedPath}`);
         return buttonedPath;
-      case 'overcoat_open':
+      case 'overcoat_open_topless':
+        // Stage 2: Open coat, topless underneath
+        console.log(`🔥 LOADING OPEN COAT TOPLESS`);
         return `${basePath}/Overcoat/open_coat_topless.png`;
+      case 'overcoat_nude':
+        // Stage 3: Fully nude/exposed
+        console.log(`🔥🔥 LOADING FULLY NUDE`);
+        return `${basePath}/Casual Wear/both.png`; // Use fully exposed casual outfit
       default:
         return `${basePath}/Casual Wear/base.png`;
     }
@@ -221,10 +231,31 @@ const CharacterSprite: React.FC<CharacterSpriteProps> = ({
   const { eyesPath, mouthPath } = getExpressionPaths();
   const blushPath = '/images/Incoatnito/7 idle standing outfits/overlays/expressions/blush.png';
 
+  // Determine background scene based on energy flags
+  const getBackgroundScene = () => {
+    const scene = energyFlags?.scene;
+    
+    switch (scene) {
+      case 'room':
+        return '/images/scenes/room.jpg';
+      case 'beach':
+        return '/images/scenes/beach.jpg';
+      case 'park':
+        return '/images/scenes/walkway-garden-bangkok-thailand.jpg';
+      default:
+        return '/images/scenes/walkway-garden-bangkok-thailand.jpg'; // Default park scene
+    }
+  };
+
   // Static images only - no animation
 
   return (
-    <div className={`character-sprite-container ${isActive ? 'active' : 'inactive'}`}>
+    <div 
+      className={`character-sprite-container ${isActive ? 'active' : 'inactive'}`}
+      style={{
+        backgroundImage: `url('${getBackgroundScene()}')`
+      }}
+    >
       <div className="sprite-wrapper">
         {/* Static sprite with normal expressions - NO ANIMATION */}
         <>

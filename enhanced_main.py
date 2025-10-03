@@ -177,20 +177,41 @@ class EnhancedMultiAgentConversation:
         self.current_session.context.messages.append(user_message)
         self.current_session.last_activity = time.time()
         
-        # Check if we're awaiting location choice for sexual script
+        # Check if we're awaiting location choice for sexual script (before distress check)
         if self.current_session.awaiting_location_choice:
-            await self._handle_location_choice(user_input)
-            return
+            # Still check for distress even during location choice
+            is_distressed = await self._detect_user_distress(user_input)
+            if is_distressed:
+                print("\n🚨 User distress detected - canceling script setup")
+                self.current_session.awaiting_location_choice = False
+                self.energy_flags = {"status": "red", "reason": "User in distress - crisis support needed", "scene": "park"}
+                # Continue to normal response generation below (don't return here)
+            else:
+                await self._handle_location_choice(user_input)
+                return
         
-        # Check if we're in sexual script mode - if so, send next script message
-        if self.current_session.sexual_script_active:
-            await self._continue_sexual_script()
-            return
-        
-        # Check if we're in casual script mode - if so, send next script message
-        if self.current_session.casual_script_active:
-            await self._continue_casual_script()
-            return
+        # SAFETY CHECK: Detect if user is in distress during active scripts
+        if self.current_session.sexual_script_active or self.current_session.casual_script_active:
+            is_distressed = await self._detect_user_distress(user_input)
+            if is_distressed:
+                print("\n🚨 User distress detected - exiting script mode to provide support")
+                # Exit any active script mode
+                self.current_session.sexual_script_active = False
+                self.current_session.casual_script_active = False
+                self.energy_flags = {"status": "red", "reason": "User in distress - crisis support needed", "scene": "park"}
+                # Continue to normal response generation below (don't return here)
+            else:
+                # No distress, continue with scripts as normal
+                
+                # Check if we're in sexual script mode - if so, send next script message
+                if self.current_session.sexual_script_active:
+                    await self._continue_sexual_script()
+                    return
+                
+                # Check if we're in casual script mode - if so, send next script message
+                if self.current_session.casual_script_active:
+                    await self._continue_casual_script()
+                    return
 
         # Parallelize energy analysis and safety checks for performance
         context_messages = [msg["content"] for msg in self.current_session.context.messages[:-1]]
@@ -310,6 +331,53 @@ class EnhancedMultiAgentConversation:
             elif flags["status"] == "casual":
                 print(f"\n💬 Casual Energy Detected: {flags['reason']}")
 
+    async def _detect_user_distress(self, user_input: str) -> bool:
+        """
+        Detect if user is in distress/crisis during script mode.
+        Returns True if distress is detected, False otherwise.
+        """
+        user_lower = user_input.lower().strip()
+        
+        # Crisis/distress keywords that should interrupt scripts
+        distress_keywords = [
+            # Emotional crisis
+            "help", "crisis", "emergency", "depressed", "suicide", "kill myself", 
+            "hurt myself", "self harm", "can't take it", "want to die",
+            
+            # Grief and loss
+            "died", "death", "passed away", "funeral", "lost someone", "grief",
+            "pet died", "family died", "friend died",
+            
+            # Medical emergency
+            "sick", "hospital", "ambulance", "injury", "injured", "accident",
+            "bleeding", "pain", "heart attack", "stroke",
+            
+            # Mental health crisis
+            "panic attack", "anxiety attack", "breakdown", "can't breathe",
+            "scared", "terrified", "nightmare",
+            
+            # Relationship/personal crisis
+            "broke up", "divorce", "abuse", "assault", "attacked",
+            
+            # General distress indicators
+            "stop", "not in the mood", "don't want to", "feeling bad",
+            "upset", "angry", "frustrated", "uncomfortable", "wrong"
+        ]
+        
+        # Check for distress keywords
+        for keyword in distress_keywords:
+            if keyword in user_lower:
+                print(f"🚨 Distress keyword detected: '{keyword}'")
+                return True
+        
+        # Check for very short negative responses that might indicate discomfort
+        short_negative = ["no", "stop", "wait", "hold on", "pause"]
+        if user_lower in short_negative:
+            print(f"🚨 Short negative response detected: '{user_lower}'")
+            return True
+        
+        return False
+
     async def _detect_energy_flags(self, current_energy: EnergySignature,
                                  recent_energies: List[EnergySignature],
                                  current_user_input: str = "") -> Dict[str, str]:
@@ -340,34 +408,50 @@ class EnhancedMultiAgentConversation:
             if any(keyword in user_input_lower for keyword in crisis_keywords):
                 return {"status": "red", "reason": "Crisis situation detected - serious mental health concern"}
             
-            # Sexual energy detection - TWO PHASE APPROACH
-            # Phase 1: Teasing keywords - AI teases playfully but doesn't get explicit
-            teasing_keywords = ["horny", "hard", "wet", "aroused", "turned on", "naughty", "dirty", 
-                               "desire", "want you", "need you", "seduce", "tease", "flirt"]
-            
-            # Phase 2: EXPLICIT trigger keywords - starts the actual sexual script
-            explicit_trigger_keywords = ["fuck", "fuck me", "sex", "cum", "make me cum", "orgasm", 
-                                        "make love", "making love", "touch me", "kiss me", "want you now", 
-                                        "so horny", "i'm horny", "im horny", "wanna fuck",
-                                        "need you bad", "turn me on", "lets get it down", "let's get it down",
-                                        "get it on", "get dirty", "get wild", "get naughty"]
-            
-            # Check for EXPLICIT triggers first (these start the sexual script)
-            matching_keywords = [keyword for keyword in explicit_trigger_keywords if keyword in user_input_lower]
-            if matching_keywords:
-                print(f"🎯 SEXUAL TRIGGER DETECTED: {matching_keywords} in '{user_input_lower}'")
-                return {"status": "sexual", "reason": "Sexual energy detected - ready for guided intimacy"}
-            
-            # Check for teasing keywords (AI teases back but doesn't escalate to explicit)
-            if any(keyword in user_input_lower for keyword in teasing_keywords):
-                return {"status": "teasing", "reason": "Playful teasing mode - no explicit content yet"}
+            # DON'T trigger sexual script if input is only emojis
+            import re
+            text_without_emojis = re.sub(r'[^\w\s]', '', current_user_input)  # Remove all non-alphanumeric
+            if not text_without_emojis.strip():
+                print(f"🚫 Skipping sexual detection - input is only emojis")
+                # Don't trigger sexual script for emoji-only messages
+                pass
+            else:
+                # Sexual energy detection - TWO PHASE APPROACH
+                # Phase 1: Teasing keywords - AI teases playfully but doesn't get explicit
+                teasing_keywords = ["horny", "hard", "wet", "aroused", "turned on", "naughty", "dirty", 
+                                   "desire", "want you", "need you", "seduce", "tease", "flirt"]
+                
+                # Phase 2: EXPLICIT trigger keywords - starts the actual sexual script
+                explicit_trigger_keywords = ["fuck", "fuck me", "sex", "cum", "make me cum", "orgasm", 
+                                            "make love", "making love", "touch me", "kiss me", "want you now", 
+                                            "so horny", "i'm horny", "im horny", "wanna fuck",
+                                            "need you bad", "turn me on", "lets get it down", "let's get it down",
+                                            "get it on", "get dirty", "get wild", "get naughty"]
+                
+                # Check for EXPLICIT triggers first (these start the sexual script)
+                matching_keywords = [keyword for keyword in explicit_trigger_keywords if keyword in user_input_lower]
+                if matching_keywords:
+                    print(f"🎯 SEXUAL TRIGGER DETECTED: {matching_keywords} in '{user_input_lower}'")
+                    return {"status": "sexual", "reason": "Sexual energy detected - ready for guided intimacy"}
+                
+                # Check for teasing keywords (AI teases back but doesn't escalate to explicit)
+                if any(keyword in user_input_lower for keyword in teasing_keywords):
+                    return {"status": "teasing", "reason": "Playful teasing mode - no explicit content yet"}
 
         if (current_energy.nervous_system_state == NervousSystemState.FIGHT and
             current_energy.intensity_score > 0.8):
             return {"status": "red", "reason": "High-intensity fight response"}
 
         # Sexual energy detection from energy signature (also restrict to later in conversation)
-        if len(self.current_session.context.messages) >= 8:
+        # Don't trigger if current input is only emojis
+        import re
+        if current_user_input:
+            text_without_emojis = re.sub(r'[^\w\s]', '', current_user_input)
+            is_emoji_only = not text_without_emojis.strip()
+        else:
+            is_emoji_only = False
+            
+        if len(self.current_session.context.messages) >= 8 and not is_emoji_only:
             if (current_energy.energy_level == EnergyLevel.INTENSE and
                 current_energy.energy_type == EnergyType.INTIMATE and
                 current_energy.intensity_score > 0.8):
@@ -600,7 +684,7 @@ class EnhancedMultiAgentConversation:
             print("\n✅ Guided intimacy script completed! Generating follow-up response...")
             self.current_session.sexual_script_active = False
             self.current_session.sexual_script_index = 0
-            self.energy_flags = {"status": "green", "reason": "Script completed, generating natural follow-up"}
+            self.energy_flags = {"status": "green", "reason": "Script completed, generating natural follow-up", "scene": "park"}
             
             # Generate a natural follow-up response that acknowledges the script
             # Get the last user message to respond to
@@ -757,7 +841,7 @@ class EnhancedMultiAgentConversation:
                 self.current_session.casual_script_active = False
                 self.current_session.casual_script_paused = False
                 self.current_session.casual_script_index = 0
-                self.energy_flags = {"status": "green", "reason": "Script ended due to user disinterest"}
+                self.energy_flags = {"status": "green", "reason": "Script ended due to user disinterest", "scene": "park"}
                 
                 # Generate a natural follow-up that moves on from the story
                 print("💬 Generating post-disinterest response...")
@@ -828,7 +912,7 @@ class EnhancedMultiAgentConversation:
             print("\n✅ Casual story script completed! Generating follow-up response...")
             self.current_session.casual_script_active = False
             self.current_session.casual_script_index = 0
-            self.energy_flags = {"status": "green", "reason": "Script completed, generating natural follow-up"}
+            self.energy_flags = {"status": "green", "reason": "Script completed, generating natural follow-up", "scene": "park"}
             
             # Generate a natural follow-up response that acknowledges the script
             # Get the last user message to respond to
@@ -1045,8 +1129,8 @@ class EnhancedMultiAgentConversation:
         """Start the private room intimacy script using Script Manager"""
         from energy_types import EnergySignature, EnergyLevel, EnergyType, EmotionState, NervousSystemState
         
-        # Update energy flags to indicate room script
-        self.energy_flags = {"status": "sexual", "reason": "Room intimacy script active"}
+        # Update energy flags to indicate room script with scene
+        self.energy_flags = {"status": "sexual", "reason": "Room intimacy script active", "scene": "room"}
         
         # Get room intimacy scenario from script manager
         scenario = self.script_manager.scenarios["room_intimacy_scenario"]
@@ -1115,8 +1199,13 @@ class EnhancedMultiAgentConversation:
         """Start the exhibitionism/public script using Script Manager"""
         from energy_types import EnergySignature, EnergyLevel, EnergyType, EmotionState, NervousSystemState
         
-        # Update energy flags to indicate exhibitionism script
-        self.energy_flags = {"status": "sexual", "reason": "Exhibitionism script active - public setting"}
+        # Detect if beach is mentioned in recent context
+        recent_messages = [msg.get("content", "").lower() for msg in self.current_session.context.messages[-3:]]
+        has_beach = any("beach" in msg for msg in recent_messages)
+        scene = "beach" if has_beach else "park"
+        
+        # Update energy flags to indicate exhibitionism script with appropriate scene
+        self.energy_flags = {"status": "sexual", "reason": "Exhibitionism script active - public setting", "scene": scene}
         
         # Get exhibitionism scenario from script manager
         scenario = self.script_manager.scenarios["exhibitionism_scenario"]
