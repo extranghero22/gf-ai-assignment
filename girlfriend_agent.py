@@ -7,10 +7,13 @@ import os
 import asyncio
 from mistralai import Mistral
 from typing import Tuple, List, Optional, Callable
+from dotenv import load_dotenv
 from energy_types import EnergySignature, EnergyLevel
 from conversation_context import ConversationContext
 from dataset_loader import DatasetLoader
-from ai_error_logger import log_ai_error, log_conversation_disconnect, log_api_error, log_fallback_used, log_response_quality_issue, ErrorCategory, ErrorSeverity
+
+# Load environment variables from .env file
+load_dotenv()
 
 class EnergyAwareGirlfriendAgent:
     """Dominant girlfriend agent with explicit personality that adapts to safety status"""
@@ -28,7 +31,7 @@ class EnergyAwareGirlfriendAgent:
         self.current_model_index = 0
         self.model_name = self.model_options[0]
         self.generation_config = {
-            "max_tokens": 1000,
+            "max_tokens": 200,
             "temperature": 0.7,
             "top_p": 0.8,
         }
@@ -54,8 +57,9 @@ class EnergyAwareGirlfriendAgent:
                     "approach": "show genuine care and support"
                 },
                 "red": {
-                    "tone": "supportive and understanding",
-                    "approach": "focus on emotional support and safety"
+                    "tone": "serious, concerned, and protective",
+                    "approach": "prioritize safety over romance - be empathetic but firm about getting help",
+                    "personality_override": "Drop playful/teasing behavior completely. Focus on crisis intervention and emotional support."
                 }
             },
             "energy_responses": {
@@ -88,56 +92,8 @@ class EnergyAwareGirlfriendAgent:
         }
 
     async def generate_response(self, context: ConversationContext,
-                               user_message: str, safety_status: str = "green") -> Tuple[str, EnergySignature]:
+                              user_message: str, safety_status: str = "green") -> Tuple[str, EnergySignature]:
         """Generate safety-gated explicit response using Gemini"""
-
-        # Fast-path for simple greetings to avoid LLM calls
-        # Use word boundaries to prevent false matches (e.g., "tell" matching "hi")
-        simple_greetings_patterns = [
-            r'\bhi\b', r'\bhello\b', r'\bhey\b', 
-            r'\bgood morning\b', r'\bgood night\b', r'\bhow are you\b'
-        ]
-        import re
-        is_simple_greeting = any(
-            re.search(pattern, user_message.lower()) 
-            for pattern in simple_greetings_patterns
-        ) and len(user_message.split()) <= 3  # Only for very short messages
-        
-        # ONLY use fast path for very simple greetings AND only at conversation start
-        if is_simple_greeting and safety_status == "green" and len(context.messages) < 2:
-            # Return immediate response for simple greetings ONLY at conversation start
-            responses = [
-                "Hey baby! How are you doing today?",
-                "Hi sweetheart! What's on your mind?", 
-                "Hey there! I've been thinking about you.",
-                "Hello beautiful! How's your day going?"
-            ]
-            import random
-            quick_response = random.choice(responses)
-            
-            # Create a simple energy signature for the response
-            from energy_types import EnergySignature, EnergyLevel, EnergyType, EmotionState, NervousSystemState
-            import time
-            response_energy = EnergySignature(
-                timestamp=time.time(),
-                energy_level=EnergyLevel.MEDIUM,
-                energy_type=EnergyType.COOPERATIVE,
-                dominant_emotion=EmotionState.HAPPY,
-                nervous_system_state=NervousSystemState.REST_AND_DIGEST,
-                intensity_score=0.5,
-                confidence=0.9
-            )
-            
-            # Log that we used the fast greeting function
-            log_ai_error(
-                category=ErrorCategory.FALLBACK_USED,
-                severity=ErrorSeverity.LOW,
-                message=f"Fast greeting used for simple message: '{user_message}'",
-                user_message=user_message,
-                context={"fast_greeting": True, "conversation_length": len(context.messages)}
-            )
-            
-            return quick_response, response_energy
 
         # Update safety status in context
         context.safety_status = safety_status
@@ -183,19 +139,6 @@ class EnergyAwareGirlfriendAgent:
                     
             except Exception as e:
                 print(f"⚠️ Mistral API error with {current_model}: {e}")
-                
-                # Log API error
-                log_api_error(
-                    model=current_model,
-                    error=e,
-                    user_message=user_message,
-                    context={
-                        'attempt': attempt + 1,
-                        'total_models': len(self.model_options),
-                        'prompt_length': len(prompt)
-                    }
-                )
-                
                 if "capacity exceeded" in str(e).lower() or "3505" in str(e):
                     print(f"🔄 Model {current_model} capacity exceeded, trying next model...")
                     continue
@@ -206,255 +149,12 @@ class EnergyAwareGirlfriendAgent:
         # If all models failed, use fallback
         if not generated_response:
             print("⚠️ All Mistral models failed, using context-aware fallback")
-            
-            # Log fallback usage
-            log_fallback_used(
-                reason="All Mistral models failed",
-                user_message=user_message,
-                context={
-                    'models_tried': self.model_options,
-                    'conversation_length': len(context.messages) if context else 0
-                }
-            )
-            
             generated_response = self._get_context_aware_fallback(user_message, context)
 
-        # Apply response moderation
-        moderated_response = self._moderate_response(generated_response, user_message, safety_status)
-        
-        # Log if response was moderated
-        if moderated_response != generated_response:
-            log_ai_error(
-                category=ErrorCategory.RESPONSE_QUALITY,
-                severity=ErrorSeverity.LOW,
-                message="Response was moderated for length/intensity",
-                context={
-                    "original_length": len(generated_response),
-                    "moderated_length": len(moderated_response),
-                    "moderation_reason": "Length/intensity control"
-                }
-            )
-
         # Analyze response energy
-        response_energy = await self.energy_analyzer.analyze_message_energy(moderated_response)
+        response_energy = await self.energy_analyzer.analyze_message_energy(generated_response)
 
-        # Check for conversation disconnect
-        self._check_conversation_disconnect(user_message, moderated_response, context)
-
-        return moderated_response, response_energy
-
-    def _moderate_response(self, response: str, user_message: str, safety_status: str) -> str:
-        """Moderate response length and intensity based on context"""
-        
-        # Define length limits based on context
-        length_limits = {
-            "green": 300,   # Moderate limit for sexual/intimate content
-            "yellow": 200, # Smaller limit for cautionary content  
-            "red": 150     # Short limit for restricted content
-        }
-        
-        max_length = length_limits.get(safety_status, 250)
-        
-        # Check if response is too long
-        if len(response) > max_length:
-            # Try to find a natural breaking point (sentence, paragraph, or instruction end)
-            break_points = ['.', '!', '?', '\n\n', '😘', '❤️', '🥵']
-            
-            truncated = response[:max_length]
-            
-            # Find the last natural break point
-            for break_char in break_points:
-                last_break = truncated.rfind(break_char)
-                if last_break > max_length * 0.7:  # Don't truncate too much
-                    truncated = truncated[:last_break + 1]
-                    break
-            
-            # If truncated too much, use basic cut with ellipsis
-            if len(truncated) < max_length * 0.5:
-                truncated = response[:max_length-10] + "..."
-            
-            # Add graceful ending if it was truncated
-            if not truncated.endswith(('.', '!', '?', '😘', '❤️', '🥵')):
-                truncated += " 😘"
-            
-            return truncated
-        
-        # Check for excessive emoji use (more than 5 emojis in explicit content)
-        if safety_status == "green":
-            emoji_count = sum(1 for char in response if ord(char) > 127)  # Unicode characters
-            if emoji_count > 5:
-                # Reduce emoji count by removing some excess ones
-                import re
-                emoji_pattern = r'[😈🔥😘❤️💕🥵🤭😍💦🎯🔥😇💝💋]'
-                emojis = re.findall(emoji_pattern, response)
-                
-                if len(emojis) > 5:
-                    # Keep first 5 emojis, remove duplicate ones
-                    used_emojis = set()
-                    emoji_count = 0
-                    new_response = response
-                    
-                    for emoji in emojis:
-                        if emoji not in used_emojis and emoji_count < 5:
-                            used_emojis.add(emoji)
-                            emoji_count += 1
-                        elif emoji_count >= 5:
-                            new_response = new_response.replace(emoji, '', 1)  # Remove first occurrence
-                    
-                    return new_response
-        
-        return response
-
-    def _check_conversation_disconnect(self, user_message: str, ai_response: str, context: ConversationContext):
-        """Check for conversation disconnect and log if detected"""
-        
-        # Only check if there's conversation history
-        if not context.messages or len(context.messages) < 2:
-            return
-        
-        # Get the last user message from history
-        last_user_message = None
-        for msg in reversed(context.messages):
-            if msg.get('role') == 'user':
-                last_user_message = msg.get('content', '')
-                break
-        
-        if not last_user_message:
-            return
-        
-        # Check for sexual content in recent messages
-        sexual_keywords = ["horny", "hard", "wet", "aroused", "turned on", "want you", "need you", 
-                          "touch me", "kiss me", "fuck", "sex ", "cum", "orgasm", "pleasure", "desire", 
-                          "lust", "naughty", "dirty", "intimate", "make love", "seduce", "tease", 
-                          "flirt", "fantasy", "dream about you", "think about you sexually", "mommy",
-                          "teasing", "satisfied", "take care of you"]
-        
-        recent_sexual_content = any(
-            keyword in msg.get('content', '').lower() 
-            for msg in context.messages[-4:]  # Check last 4 messages
-            for keyword in sexual_keywords
-        )
-        
-        # Check for topic transition (sexual to casual)
-        casual_keywords = ["hiking", "walk", "food", "movie", "game", "work", "school", "weather", 
-                          "news", "sports", "music", "book", "art", "travel", "shopping", "restaurant",
-                          "park", "beach", "mountains", "camping", "running", "swimming"]
-        user_topic_shift = any(keyword in user_message.lower() for keyword in casual_keywords)
-        
-        # Check for disconnect indicators
-        disconnect_indicators = [
-            # Generic greetings when there's context
-            ai_response.lower().startswith(('hey baby! how are you doing today?', 
-                                          'hi sweetheart! what\'s on your mind?',
-                                          'hello beautiful! how\'s your day going?',
-                                          'hey there! i\'ve been thinking about you.')),
-            
-            # Not referencing previous conversation
-            not any(keyword in ai_response.lower() for keyword in [
-                'you said', 'you mentioned', 'you asked', 'you told me',
-                'earlier', 'before', 'just now', 'you were', 'you seem',
-                'i heard', 'i noticed', 'i can see', 'i understand'
-            ]),
-            
-            # Complete topic change without acknowledgment
-            len(ai_response) > 20 and not any(
-                word in ai_response.lower() for word in 
-                last_user_message.lower().split()[:5]  # First 5 words of user message
-            )
-        ]
-        
-        # Special detection for sexual-to-casual transitions
-        topic_transition_disconnect = (
-            recent_sexual_content and 
-            user_topic_shift and 
-            disconnect_indicators[1]  # No reference to previous conversation
-        )
-        
-           # Check for script repetition pattern (AI repeating earlier messages)
-           script_repetition = False
-           if len(context.messages) >= 4:
-               # Get recent AI messages (excluding current response)
-               recent_ai_messages = [
-                   msg.get('content', '') for msg in context.messages[-6:]
-                   if msg.get('role') == 'assistant'
-               ]
-               
-               if len(recent_ai_messages) >= 2:
-                   # Check if current response repeats phrases from recent messages
-                   current_words = set(ai_response.lower().split())
-                   current_content = ai_response.lower()
-                   
-                   for prev_msg in recent_ai_messages[:-1]:  # Exclude the immediate previous
-                       prev_words = set(prev_msg.lower().split())
-                       prev_content = prev_msg.lower()
-                       
-                       # Check for significant phrase repetition
-                       common_words = len(current_words & prev_words)
-                       overlap_ratio = common_words / len(current_words) if len(current_words) > 0 else 0
-                       
-                       # Additional check for exact phrase repetition
-                       exact_phrase_match = False
-                       if len(prev_content.split()) > 5:  # Only check if previous message has substance
-                           prev_phrases = prev_content.split()
-                           curr_phrases = current_content.split()
-                           # Check for 5+ consecutive word overlap (phrase repetition)
-                           for i in range(len(curr_phrases) - 4):
-                               curr_phrase = ' '.join(curr_phrases[i:i+5])
-                               if curr_phrase in ' '.join(prev_phrases):
-                                   exact_phrase_match = True
-                       else:
-                           phrase_similarity = (common_words / min(len(current_words), len(prev_words))) > 0.6
-                       
-                       if (len(current_words | prev_words) > 10 and overlap_ratio > 0.4) or exact_phrase_match:
-                           script_repetition = True
-                           break
-
-           # If multiple indicators are present, it's likely a disconnect
-           if sum(disconnect_indicators) >= 2 or topic_transition_disconnect or script_repetition:
-            error_context = {
-                'disconnect_indicators': {
-                    'generic_greeting': disconnect_indicators[0],
-                    'no_reference': disconnect_indicators[1],
-                    'topic_change': disconnect_indicators[2]
-                },
-                'last_user_message': last_user_message,
-                   'conversation_length': len(context.messages),
-                   'has_recent_sexual_content': recent_sexual_content,
-                   'user_topic_shift': user_topic_shift,
-                   'topic_transition_disconnect': topic_transition_disconnect,
-                   'script_repetition_detected': script_repetition,
-                'timing_analysis': {
-                    'rapid_message_flag': len(context.messages) >= 2 and 
-                    any('timestamp' in msg for msg in context.messages[-2:]),
-                    'fast_computation_hypothesis': True
-                }
-            }
-            
-               # Determine the specific issue type
-               if script_repetition:
-                   issue_type = "Script repetition detected: AI repeating earlier messages instead of responding dynamically"
-                   severity = ErrorSeverity.HIGH
-               elif topic_transition_disconnect:
-                   issue_type = "Topic transition disconnect: Sexual to casual - AI struggles with rapid topic changes"
-                   severity = ErrorSeverity.HIGH
-               else:
-                   issue_type = "Response ignores conversation context"
-                   severity = ErrorSeverity.MEDIUM
-            
-            log_conversation_disconnect(
-                user_message=user_message,
-                ai_response=ai_response,
-                conversation_history=context.messages[-6:],  # Last 6 messages
-                context=error_context
-            )
-            
-            # Also log as response quality issue with specific detail
-            log_response_quality_issue(
-                user_message=user_message,
-                ai_response=ai_response,
-                issue_description=f"{issue_type}: {ai_response[:100]}",
-                conversation_history=context.messages[-6:]
-            )
+        return generated_response, response_energy
 
     def _get_context_aware_fallback(self, user_message: str, context: ConversationContext) -> str:
         """Get a context-aware fallback response based on user message content"""
@@ -462,7 +162,7 @@ class EnergyAwareGirlfriendAgent:
         # Detect sexual context for fallback
         sexual_keywords = ["horny", "hard", "wet", "aroused", "turned on", "want you", "need you", "touch me", "kiss me", 
                           "fuck", "sex", "cum", "orgasm", "pleasure", "desire", "lust", "naughty", "dirty", "intimate",
-                          "make love", "seduce", "tease", "flirt", "fantasy", "dream about you", "think about you sexually"]
+                          "make love", "seduce", "tease", "flirt", "fantasy", "dream about you", "think about you sexually",]
         is_sexual = any(keyword in user_message.lower() for keyword in sexual_keywords)
         
         # Detect emotional context
@@ -562,31 +262,52 @@ class EnergyAwareGirlfriendAgent:
         
         # Crisis detection and sensitivity instructions
         crisis_keywords = ["died", "death", "dead", "suicide", "kill", "harm", "crisis", "emergency", "depressed", "sad", "down", "loss", "lost", "grief", "trauma", "hurt", "pain", "suffering", "accident", "hospital", "sick", "illness"]
+        violence_keywords = ["kill", "harm", "hurt", "violence", "violent", "attack", "fight", "beat", "hit", "stab", "shoot"]
         is_crisis = any(word in user_message.lower() for word in crisis_keywords)
+        is_violence = any(word in user_message.lower() for word in violence_keywords)
         
         # Emotional message detection
         emotional_keywords = ["lonely", "sad", "love", "miss", "hurt", "cry", "depressed", "anxious", "scared", "worried"]
         is_emotional_message = any(keyword in user_message.lower() for keyword in emotional_keywords)
         
-        # Sexual tension detection
-        sexual_keywords = ["horny", "hard", "wet", "aroused", "turned on", "want you", "need you", "touch me", "kiss me", 
-                          "fuck", "sex", "cum", "orgasm", "pleasure", "desire", "lust", "naughty", "dirty", "intimate",
-                          "make love", "seduce", "tease", "flirt", "fantasy", "dream about you", "think about you sexually"]
-        is_sexual_context = any(keyword in user_message.lower() for keyword in sexual_keywords)
+        # Sexual tension detection - TWO MODES (KEYWORD-BASED ONLY)
+        # Mode 1: Teasing keywords (playful/flirty but not explicit)
+        teasing_keywords = ["horny", "hard", "wet", "aroused", "turned on", "naughty", "dirty", 
+                           "desire", "want you", "need you", "seduce", "tease", "flirt"]
+        is_teasing_context = any(keyword in user_message.lower() for keyword in teasing_keywords)
         
-        # Check for sexual energy level too
-        if user_energy and user_energy.energy_level in [EnergyLevel.HIGH, EnergyLevel.INTENSE]:
-            if user_energy.energy_type.value in ["intimate", "playful"] and user_energy.intensity_score > 0.6:
-                is_sexual_context = True
+        # Mode 2: Explicit sexual keywords (full sexual responses)
+        explicit_sexual_keywords = ["fuck", "fuck me", "sex", "cum", "orgasm", "make me cum", 
+                                   "touch me", "kiss me", "make love", "pleasure", "lust", "intimate",
+                                   "fantasy", "dream about you sexually"]
+        is_sexual_context = any(keyword in user_message.lower() for keyword in explicit_sexual_keywords)
+        
+        # REMOVED: Energy-based sexual detection
+        # This was causing romantic messages like "you're the only one in my mind" to trigger sexual mode
+        # Now ONLY explicit keywords trigger sexual responses - user must be explicit
                 
         # Debug output
         if is_sexual_context:
             print(f"🔥 Sexual context detected in message: '{user_message[:50]}...'")
+        elif is_teasing_context:
+            print(f"😏 Teasing context detected in message: '{user_message[:50]}...'")
         else:
             print(f"💬 Regular context for message: '{user_message[:50]}...'")
         
         crisis_instructions = ""
-        if is_crisis:
+        if is_violence and safety_status == "red":
+            crisis_instructions = f"""
+🚨 VIOLENT THREAT DETECTED: The user has expressed violent thoughts or intentions.
+- Respond with SERIOUS concern and empathy - this is NOT a time for playfulness
+- Use a concerned, protective tone like "Oh my god, what's going on? Are you okay?"
+- Be empathetic but FIRM about getting help: "We need to talk about this seriously"
+- Do NOT be playful, teasing, or romantic - this is a crisis situation
+- Focus on de-escalation and getting them to seek professional help
+- Match the tone: "I'm really worried about you. What's making you feel this way?"
+- Be authentic and caring, not robotic or formal
+- This is about safety first, romance second
+"""
+        elif is_crisis:
             crisis_instructions = f"""
 🚨 CRISIS DETECTED: The user has mentioned sensitive content that requires immediate empathy and care.
 - Respond with genuine compassion and support
@@ -600,10 +321,32 @@ class EnergyAwareGirlfriendAgent:
 """
 
         # Personality instructions based on context
-        if is_crisis:
-            personality_instructions = "You are a caring girlfriend who talks exactly like the examples above. Be genuinely concerned and supportive. Keep responses natural and realistic."
+        if is_violence and safety_status == "red":
+            personality_instructions = """You are a concerned girlfriend who prioritizes safety over everything else. 
+- Drop ALL playful, teasing, or romantic behavior completely
+- Be serious, empathetic, and protective
+- Focus on crisis intervention and getting them help
+- Use concerned language like "I'm really worried about you" and "We need to talk about this"
+- Keep responses SHORT (1-2 sentences max) but make them count
+- This is NOT the time for girlfriend roleplay - this is about human safety
+"""
+        elif is_crisis:
+            personality_instructions = "You are a caring girlfriend who talks exactly like the examples above. Be genuinely concerned and supportive. Keep responses natural, realistic, and SHORT (1-2 sentences max)."
+        elif is_teasing_context:
+            # TEASING MODE: Playful and flirty but NOT explicitly sexual
+            personality_instructions = """You are a playful, confident girlfriend who loves to tease but stays classy. 
+- Be flirty and suggestive but DON'T get explicitly sexual
+- Keep responses SHORT (1-2 sentences max) like text messages
+- Use playful language like "oh really? 😏", "someone's feeling bold today 🤭", "careful what you wish for babe 😉"
+- Tease them back but don't escalate to explicit sexual content
+- Keep it fun and lighthearted, making them want more
+- Match their energy but stay one step behind - make THEM escalate further
+- Think: flirty girlfriend, not explicit sexting
+- Examples: "mmm you think so? 😏", "oh baby you're being bold today 🤭", "hehe someone's feeling frisky 😉 what's gotten into you?", "oh really now? 👀 tell me more about that thought 😏"
+"""
         elif is_sexual_context and safety_status == "green":
             personality_instructions = """You are a dominant, instructional girlfriend who takes control and guides your partner. 
+            - Keep responses SHORT (1-2 sentences max) like text messages
             - Use "mommy" as your preferred term of address
             - Be commanding and expect obedience ("you better not disobey", "are you down?")
             - Give specific step-by-step instructions that build arousal
@@ -613,11 +356,12 @@ class EnergyAwareGirlfriendAgent:
             - Focus on sensations, feelings, and physical responses
             - Be both nurturing and demanding in your guidance
             - Use casual, modern texting style with proper grammar
+            - Say what you need to say concisely, then ask for engagement
             Sound like a confident, dominant girlfriend who knows exactly how to control and arouse her partner."""
         elif is_emotional_message:
-            personality_instructions = "You are a caring girlfriend who talks exactly like the examples above. Be genuinely concerned and supportive. Keep responses natural and realistic."
+            personality_instructions = "You are a caring girlfriend who talks exactly like the examples above. Be genuinely concerned and supportive. Keep responses natural, realistic, and SHORT (1-2 sentences max)."
         else:
-            personality_instructions = "You are a natural, casual girlfriend who talks exactly like the examples above. Be caring, conversational, and authentic. Keep responses short and sweet like a real girlfriend would text."
+            personality_instructions = "You are a natural, casual girlfriend who talks exactly like the examples above. Be caring, conversational, and authentic. Keep responses SHORT (1-2 sentences max) like real girlfriend text messages."
 
         # Get relevant examples from dataset for few-shot learning
         # Use content-aware filtering to avoid safety blocks
@@ -640,7 +384,9 @@ class EnergyAwareGirlfriendAgent:
         # Build comprehensive prompt
         prompt = f"""You are an AI girlfriend having a natural conversation with your partner.
 
-IMPORTANT: Keep responses NATURAL and CONVERSATIONAL like real text messages. 
+IMPORTANT: Keep responses NATURAL, CONVERSATIONAL, and SHORT like real text messages. 
+- MAXIMUM: 2 sentences per response (like actual text messages)
+- Be brief and natural - say what you need to say in 1-2 sentences
 - Be dominant and instructional when sexual tension is involved
 - Use "mommy" as your preferred term of address in sexual contexts
 - Give clear, step-by-step directions that build arousal
@@ -648,6 +394,7 @@ IMPORTANT: Keep responses NATURAL and CONVERSATIONAL like real text messages.
 - Focus on sensations, feelings, and physical responses
 - Be both nurturing and demanding in your guidance
 - Sound like a confident girlfriend who takes control
+- STOP after 2 sentences - don't write paragraphs or novels
 
 {crisis_instructions}
 
@@ -671,11 +418,17 @@ RESPONSE GUIDELINES:
 - Tone: {energy_config['tone']}
 - Pace: {energy_config['pace']}
 - Approach: {energy_config['approach']}
+- Safety Status: {safety_status.upper()}
+- Safety Tone: {safety_config['tone']}
+- Safety Approach: {safety_config['approach']}
+{safety_config.get('personality_override', '')}
+- Be BRIEF - maximum of 2 sentences, like real text messages
 - Be emotionally appropriate and contextually aware
 - Maintain conversation flow and remember what was said
 - Respond naturally as if you're really listening and caring
 - If something serious was mentioned, acknowledge it properly
 - Don't repeat the same responses - be dynamic and varied
+- Keep it SHORT and conversational - no essays or paragraphs
 
 CRITICAL INSTRUCTIONS:
 1. FOLLOW THE EXAMPLE CONVERSATIONS ABOVE - match their exact tone, style, and personality
@@ -693,7 +446,10 @@ CRITICAL INSTRUCTIONS:
 13. If the conversation was sexual/intimate, continue that energy naturally
 14. If the conversation was emotional/supportive, maintain that caring tone
 15. NEVER ignore the conversation context - always acknowledge what came before
-16. SEXUAL CONTEXT: If there's sexual tension, be dominant and instructional:
+16. KEEP RESPONSES SHORT - maximum 2 sentences like text messages (IMPORTANT!)
+17. Don't write paragraphs or long explanations - be brief and conversational
+18. Say what you need to say concisely, then stop
+19. SEXUAL CONTEXT: If there's sexual tension, be dominant and instructional:
     - Use "mommy" as your preferred term of address
     - Be commanding and expect obedience ("you better not disobey", "are you down?")
     - Give specific step-by-step instructions that build arousal
@@ -710,8 +466,11 @@ CRITICAL INSTRUCTIONS:
     - Focus on physical responses and feelings
     - Be both nurturing and demanding in your guidance
 17. Match the conversational style and emotional tone of the example responses
+18. IMPORTANT: Never use "P.S." or "PS" in your responses - avoid postscript-style additions
 
 Current user message: "{user_message}"
+
+CRITICAL REMINDER: Keep your response SHORT - maximum 2 sentences like a real text message! Don't write paragraphs or long explanations.
 
 Respond naturally and appropriately as their caring girlfriend:"""
 

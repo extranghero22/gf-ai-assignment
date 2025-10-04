@@ -1,0 +1,314 @@
+/* Character Sprite Container */
+.character-sprite-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  /* Background will be set via React style prop */
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  border-radius: 20px;
+  min-width: 300px;
+  max-width: 500px;
+  height: fit-content;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+  background: #2C2C2C;
+}
+
+/* Blurred background layer */
+.character-sprite-container::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image: inherit;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  filter: blur(3px);
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* Dark overlay to ensure sprite visibility */
+.character-sprite-container::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, rgba(0, 0, 0, 0.4) 0%, rgba(0, 0, 0, 0.2) 50%, rgba(0, 0, 0, 0.3) 100%);
+  border-radius: 20px;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* Ensure content is above the overlay */
+.character-sprite-container > * {
+  position: relative;
+  z-index: 1;
+}
+
+.character-sprite-container.inactive {
+  opacity: 0.95;
+}
+
+.character-sprite-container.active {
+  animation: fadeIn 0.5s ease;
+}
+
+/* Placeholder for inactive state */
+.sprite-placeholder {
+  text-align: center;
+  color: white;
+  padding: 2rem;
+}
+
+.placeholder-icon {
+  font-size: 4rem;
+  margin-bottom: 1rem;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.1); opacity: 0.8; }
+}
+
+.sprite-placeholder p {
+  font-size: 1rem;
+  opacity: 0.9;
+  margin: 0;
+}
+
+/* Sprite Wrapper with layered images */
+.sprite-wrapper {
+  position: relative;
+  width: 100%;
+  max-width: 350px;
+  height: 550px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 0rem;
+  overflow: hidden;
+}
+
+.sprite-layer {
+  position: absolute;
+  width: 120%;
+  height: 120%;
+  object-fit: contain;
+  top: -10%;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+/* Animation overlay for coat opening (sits on top of body layer) */
+.sprite-animation-overlay {
+  z-index: 2;
+}
+
+.sprite-base {
+  z-index: 1;
+}
+
+.sprite-base.animated-sprite {
+  /* Ensure smooth frame transitions */
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+}
+
+.sprite-expression {
+  z-index: 2;
+}
+
+.sprite-blush {
+  z-index: 3;
+  animation: blushFade 0.5s ease-in;
+}
+
+@keyframes blushFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Typing indicator overlay on sprite */
+.sprite-typing-indicator {
+  position: absolute;
+  top: 1%;
+  left: 90%;
+  transform: translateX(-50%);
+  z-index: 4;
+  animation: bounceIn 0.3s ease;
+}
+
+@keyframes bounceIn {
+  from { 
+    opacity: 0; 
+    transform: translateX(-50%) scale(0.5) translateY(-10px); 
+  }
+  to { 
+    opacity: 1; 
+    transform: translateX(-50%) scale(1) translateY(0); 
+  }
+}
+
+.typing-bubble {
+  background: white;
+  padding: 0.75rem 1rem;
+  border-radius: 20px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.typing-bubble span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #667eea;
+  animation: typing 1.4s infinite ease-in-out;
+}
+
+.typing-bubble span:nth-child(1) { animation-delay: -0.32s; }
+.typing-bubble span:nth-child(2) { animation-delay: -0.16s; }
+.typing-bubble span:nth-child(3) { animation-delay: 0s; }
+
+@keyframes typing {
+  0%, 80%, 100% { transform: scale(0.8); opacity: 0.5; }
+  40% { transform: scale(1.2); opacity: 1; }
+}
+
+/* Sprite name and mood */
+.sprite-name {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 15px;
+  width: 100%;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.name-text {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #FFD700;
+  margin: 0;
+}
+
+.mood-text {
+  font-size: 0.9rem;
+  color: #B0B0B0;
+  font-style: italic;
+  margin: 0;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Responsive Design */
+@media (max-width: 1200px) {
+  .character-sprite-container {
+    min-width: 250px;
+    max-width: 300px;
+    padding: 1.5rem;
+  }
+  
+  .sprite-wrapper {
+    max-width: 250px;
+    height: 450px;
+  }
+  
+  .name-text {
+    font-size: 1.25rem;
+  }
+  
+  .mood-text {
+    font-size: 0.85rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .character-sprite-container {
+    min-width: 200px;
+    max-width: 250px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+  }
+  
+  .sprite-wrapper {
+    max-width: 200px;
+    height: 300px;
+  }
+  
+  .name-text {
+    font-size: 1.1rem;
+  }
+  
+  .mood-text {
+    font-size: 0.8rem;
+  }
+}
+
+/* Enhanced Mobile Character Sprite */
+@media (max-width: 480px) {
+  .character-sprite-container {
+    min-width: 150px;
+    max-width: 200px;
+    padding: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+  
+  .sprite-wrapper {
+    max-width: 150px;
+    height: 250px;
+  }
+  
+  .name-text {
+    font-size: 1rem;
+  }
+  
+  .mood-text {
+    font-size: 0.75rem;
+  }
+}
+
+/* Ultra-small screens */
+@media (max-width: 360px) {
+  .character-sprite-container {
+    min-width: 120px;
+    max-width: 150px;
+    padding: 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+  
+  .sprite-wrapper {
+    max-width: 120px;
+    height: 200px;
+  }
+  
+  .name-text {
+    font-size: 0.9rem;
+  }
+  
+  .mood-text {
+    font-size: 0.7rem;
+  }
+}
+

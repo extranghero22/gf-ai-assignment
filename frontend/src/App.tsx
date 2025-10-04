@@ -7,6 +7,8 @@ import ChatInput from './components/ChatInput';
 import EnergyIndicator from './components/EnergyIndicator';
 import SessionControls from './components/SessionControls';
 import MetricsModal from './components/MetricsModal';
+import CharacterSprite from './components/CharacterSprite';
+import CrisisToast from './components/CrisisToast';
 import './App.css';
 
 const App: React.FC = () => {
@@ -17,6 +19,8 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showMetrics, setShowMetrics] = useState(false);
+  const [showCrisisToast, setShowCrisisToast] = useState(false);
+  const [crisisToastReason, setCrisisToastReason] = useState<string>('');
   const [metrics, setMetrics] = useState<any>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentStreamingMessage, setCurrentStreamingMessage] = useState<string>('');
@@ -168,6 +172,27 @@ const App: React.FC = () => {
           // Update energy flags
           if (complete.energy_status) {
             setCurrentEnergyFlags(complete.energy_status);
+            
+            // Check for crisis situation and show alert
+            if (complete.energy_status.status === 'red' && 
+                (complete.energy_status.reason.includes('crisis') || 
+                 complete.energy_status.reason.includes('mental health') ||
+                 complete.energy_status.reason.includes('extreme sadness') ||
+                 complete.energy_status.reason.includes('Violent threat') ||
+                 complete.energy_status.reason.includes('violence') ||
+                 complete.energy_status.reason.includes('safety concern'))) {
+              setCrisisToastReason(complete.energy_status.reason);
+              setShowCrisisToast(true);
+            }
+          }
+          
+          // Check if session was stopped due to safety concerns
+          if ((complete as any).session_stopped) {
+            console.log('Session stopped due to safety concerns - stopping chat automatically');
+            setIsActive(false);
+            setSessionId(undefined);
+            setCrisisToastReason('Session terminated due to safety concerns');
+            setShowCrisisToast(true);
           }
           
           // Start the typing simulation with collected messages
@@ -194,7 +219,16 @@ const App: React.FC = () => {
 
     } catch (error) {
       console.error('Error sending message:', error);
-      setError('Failed to send message. Please try again.');
+      
+      // Check if session was stopped due to safety concerns
+      if (error instanceof Error && error.message.includes('Session has been stopped')) {
+        setCrisisToastReason('Session terminated due to safety concerns');
+        setShowCrisisToast(true);
+        setError('Session terminated due to safety concerns. Please start a new conversation.');
+      } else {
+        setError('Failed to send message. Please try again.');
+      }
+      
       setIsStreaming(false);
       setCurrentStreamingMessage('');
     }
@@ -214,11 +248,19 @@ const App: React.FC = () => {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>🌟 AI Girlfriend Chat</h1>
-        <p>Energy-Aware Conversation System</p>
+        <h1> Date Linh </h1>
+        <p>AI Chat with Linh</p>
       </header>
 
       <main className="app-main">
+        {/* Character Sprite Section */}
+        <CharacterSprite 
+          energyFlags={currentEnergyFlags}
+          isTyping={isTyping}
+          isActive={isActive}
+          messageCount={messages.length}
+        />
+
         <div className="chat-container">
           <div className="chat-header">
             <SessionControls
@@ -272,6 +314,16 @@ const App: React.FC = () => {
               <button onClick={() => setError(null)}>✕</button>
             </div>
           )}
+
+          {/* Crisis Alert Toast */}
+          <CrisisToast 
+            show={showCrisisToast}
+            reason={crisisToastReason}
+            onClose={() => {
+              setShowCrisisToast(false);
+              setCrisisToastReason('');
+            }}
+          />
 
           <div className="chat-input-container">
             <ChatInput
