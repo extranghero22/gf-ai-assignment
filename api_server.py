@@ -63,17 +63,12 @@ def _check_and_redirect_to_sexual_script(conversation_system):
         ai_response_lower = ai_response_content.lower()
         found_keywords = [kw for kw in sexual_keywords if kw in ai_response_lower]
         
-        # Also check for explicit content indicators (removed ❤️ and 😈 as they're too common now)
-        explicit_indicators = ['🥵', '🔥', '💋', '🌶️', '🔞']
-        has_explicit_emojis = any(emoji in ai_response_content for emoji in explicit_indicators)
-        
-        # Check if AI response is sexual enough to trigger script (len >= 3 keywords OR explicit emojis)
-        is_sexual_response = len(found_keywords) >= 3 or has_explicit_emojis
+        # Check if AI response is sexual enough to trigger script (keywords only)
+        is_sexual_response = len(found_keywords) >= 3
         
         if is_sexual_response:
             print(f"🔍 AI Response Analysis: SEXUAL content detected!")
             print(f"🔍 Keywords found: {found_keywords}")
-            print(f"🔍 Explicit emojis: {has_explicit_emojis}")
             print(f"🔍 AI Response: {ai_response_content[:100]}...")
             
             # Replace the sexual AI response with location question
