@@ -8,6 +8,7 @@ import asyncio
 import threading
 import time
 import json
+import os
 
 from enhanced_main import EnhancedMultiAgentConversation, ConversationState
 import random
@@ -21,7 +22,14 @@ from ai_error_logger import log_ai_error, ErrorCategory, ErrorSeverity
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for React frontend
+
+# Configure CORS for production deployment
+# Allow your Vercel frontend domain
+CORS(app, origins=[
+    "http://localhost:3000",  # Local development
+    "https://date-linh.vercel.app",  # Your Vercel deployment
+    "https://*.vercel.app"  # Any Vercel subdomain
+])
 
 # Global variables for conversation management
 conversation_system = None
@@ -162,6 +170,15 @@ def run_conversation_async():
         )
     finally:
         conversation_running = False
+
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """Health check endpoint for deployment monitoring"""
+    return jsonify({
+        "status": "healthy",
+        "timestamp": time.time(),
+        "conversation_running": conversation_running
+    })
 
 @app.route('/api/start', methods=['POST'])
 def start_conversation():
@@ -465,6 +482,12 @@ def get_error_statistics():
         return jsonify({"error": str(e)})
 
 if __name__ == '__main__':
+    # Get port from environment variable (for production deployment)
+    port = int(os.environ.get('PORT', 5000))
+    debug_mode = os.environ.get('FLASK_ENV') != 'production'
+    
     print("Starting Flask API server...")
-    print("React frontend should connect to: http://localhost:5000")
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    print(f"React frontend should connect to: http://localhost:{port}")
+    print(f"Debug mode: {debug_mode}")
+    
+    app.run(debug=debug_mode, host='0.0.0.0', port=port)

@@ -24,7 +24,10 @@ export interface StreamError {
 
 export type StreamEvent = StreamMessagePart | StreamComplete | StreamError;
 
-const API_BASE_URL = 'http://localhost:5000/api';
+// Check if we're in production (deployed) or development
+const isProduction = process.env.NODE_ENV === 'production';
+// Replace this with your actual Railway backend URL after deployment
+const API_BASE_URL = isProduction ? 'https://your-backend-url.railway.app/api' : 'http://localhost:5000/api';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -32,6 +35,8 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+// Note: Mock responses removed - now using real backend API
 
 export const conversationApi = {
   // Start a new conversation session
