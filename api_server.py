@@ -8,10 +8,16 @@ import asyncio
 import threading
 import time
 import json
+
+from enhanced_main import EnhancedMultiAgentConversation, ConversationState
 import random
+from dotenv import load_dotenv
 from enhanced_main import get_conversation_system
 from typing_simulator import MultiMessageGenerator
 from message_splitter import MessageSplitter
+
+# Load environment variables from .env file
+load_dotenv()
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for React frontend
@@ -188,6 +194,10 @@ def send_message():
     if not conversation_system or not conversation_system.current_session:
         return jsonify({"error": "No active session"})
     
+    # Check if session is stopped
+    if conversation_system.current_session.state == ConversationState.STOPPED:
+        return jsonify({"error": "Session has been stopped"})
+    
     data = request.get_json()
     message = data.get('message', '')
     
@@ -220,11 +230,15 @@ def send_message():
 @app.route('/api/send-stream', methods=['POST'])
 def send_message_stream():
     """Send a message and stream multiple responses with typing simulation"""
-    print(f"🚀 API STREAMING CALLED - {time.strftime('%H:%M:%S')}")
+    print(f"API STREAMING CALLED - {time.strftime('%H:%M:%S')}")
     global conversation_system, message_generator
     
     if not conversation_system or not conversation_system.current_session:
         return jsonify({"error": "No active session"})
+    
+    # Check if session is stopped
+    if conversation_system.current_session.state == ConversationState.STOPPED:
+        return jsonify({"error": "Session has been stopped"})
     
     data = request.get_json()
     message = data.get('message', '')
@@ -335,14 +349,20 @@ def send_message_stream():
                     # Send completion event
                     completion_data = {
                         "type": "complete",
-                        "energy_status": conversation_system.energy_flags
+                        "energy_status": conversation_system.energy_flags,
+                        "session_stopped": conversation_system.session_stopped_for_safety
                     }
                     print(f"🔵 Completion data: {completion_data}")
                     yield f"data: {json.dumps(completion_data)}\n\n"
                 else:
-                    # No agent messages found
-                    error_data = {"type": "error", "message": "No agent response found"}
-                    yield f"data: {json.dumps(error_data)}\n\n"
+                    # No agent messages found - but still send energy status for crisis toast
+                    completion_data = {
+                        "type": "complete",
+                        "energy_status": conversation_system.energy_flags,
+                        "session_stopped": conversation_system.session_stopped_for_safety
+                    }
+                    print(f"🔵 No agent messages, but sending energy status: {completion_data}")
+                    yield f"data: {json.dumps(completion_data)}\n\n"
             else:
                 # No session
                 error_data = {"type": "error", "message": "No active session"}
@@ -380,6 +400,10 @@ def get_metrics():
     try:
         if not conversation_system or not conversation_system.current_session:
             return jsonify({"error": "No active session"})
+        
+        # Check if session is stopped
+        if conversation_system.current_session.state == ConversationState.STOPPED:
+            return jsonify({"error": "Session has been stopped"})
         
         # Get session metrics
         loop = asyncio.new_event_loop()

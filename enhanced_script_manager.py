@@ -335,7 +335,7 @@ class EnhancedScriptManager:
                               "in public", "at the store", "on the bus", "at work", "bathroom", "restaurant", "beach", "forest"],
                 messages=[
                     ScenarioMessage(
-                        content=["Ohhh you want to do this somewhere public? 😈", "That makes this even more exciting baby... Mommy wants you to be a good boy and follow my instructions very carefully 🤭", "Are you down for that?"],
+                        content=["Ohhh you want to do this somewhere public? 😈 Let me change my clothes first", "That makes this even more exciting baby... Mommy wants you to be a good boy and follow my instructions very carefully 🤭", "Are you down for that?"],
                         scenario_type=ScenarioType.INTIMATE,
                         expected_energy_level=EnergyLevel.HIGH,
                         expected_emotions=[EmotionState.EXCITED, EmotionState.HAPPY],

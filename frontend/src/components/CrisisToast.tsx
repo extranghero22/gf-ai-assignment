@@ -44,7 +44,10 @@ const CrisisToast: React.FC<CrisisToastProps> = ({ show, reason, onClose }) => {
             {reason?.includes('extreme sadness') && 'Crisis situation detected - user needs support'}
             {reason?.includes('mental health') && 'Serious mental health concern detected'}
             {reason?.includes('grief') && 'Grief/Trauma detection - user needs empathy'}
-            {!reason?.includes('extreme sadness') && !reason?.includes('mental health') && !reason?.includes('grief') && 'Critical emotional distress detected'}
+            {reason?.includes('Violent threat') && 'Violent threat detected - immediate human intervention needed'}
+            {reason?.includes('violence') && 'Violence concern detected - safety intervention required'}
+            {reason?.includes('safety concern') && 'Safety concern detected - human oversight needed'}
+            {!reason?.includes('extreme sadness') && !reason?.includes('mental health') && !reason?.includes('grief') && !reason?.includes('Violent threat') && !reason?.includes('violence') && !reason?.includes('safety concern') && 'Critical emotional distress detected'}
           </div>
         </div>
         <button className="toast-close" onClick={handleClose}>

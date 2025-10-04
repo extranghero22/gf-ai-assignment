@@ -43,54 +43,71 @@ const CharacterSprite: React.FC<CharacterSpriteProps> = ({
       // Detect script type from reason (backend sends this info)
       if (reason && reason.toLowerCase().includes('exhibitionism')) {
         setScriptType('exhibitionism');
+        console.log('🎭 Script type detected: exhibitionism');
       } else if (reason && reason.toLowerCase().includes('room')) {
         setScriptType('room');
+        console.log('🏠 Script type detected: room');
       }
       
-      // Track sexual intensity progression based on message count
-      if (status === 'sexual') {
-        // Don't change outfit if still awaiting location choice
-        if (reason && reason.toLowerCase().includes('awaiting')) {
-          console.log('Awaiting location choice - keeping current outfit');
-          // Don't increment count or change outfit yet
-        } else {
-          // Increment count when new messages arrive
-          if (messageCount > lastMessageCount) {
-            setSexualMessageCount(prev => prev + 1);
-            setLastMessageCount(messageCount);
-            console.log(`Sexual script progression: ${sexualMessageCount + 1}/10, Type: ${scriptType}`);
-          }
-        }
-        
-        // Check if this is exhibitionism script (overcoat outfit - NO ANIMATION)
-        // 3-stage progression: buttoned → open topless → fully nude
-        if (scriptType === 'exhibitionism' || (reason && reason.toLowerCase().includes('public')) || (reason && reason.toLowerCase().includes('outside'))) {
-          // STATIC ONLY: Progressive reveal in 3 stages
-          if (sexualMessageCount >= 7) {
-            console.log(`🔥🔥 EXHIBIT SCRIPT: Message ${sexualMessageCount + 1} → FULLY NUDE`);
-            setCurrentOutfit('overcoat_nude'); // Stage 3: Fully exposed
-          } else if (sexualMessageCount >= 4) {
-            console.log(`🔥 EXHIBIT SCRIPT: Message ${sexualMessageCount + 1} → OPEN COAT TOPLESS`);
-            setCurrentOutfit('overcoat_open_topless'); // Stage 2: Coat open, topless
+        // Track sexual intensity progression based on sexual script messages only
+        if (status === 'sexual') {
+          // Don't change outfit if still awaiting location choice
+          if (reason && reason.toLowerCase().includes('awaiting')) {
+            console.log('Awaiting location choice - keeping current outfit');
+            // Reset count when awaiting location choice
+            if (sexualMessageCount > 0) {
+              console.log('🔄 Resetting sexual message count - awaiting location choice');
+              setSexualMessageCount(0);
+            }
+            console.log(`📍 Status: Awaiting location choice, sexualMessageCount: ${sexualMessageCount}`);
+            // Don't increment count or change outfit yet
           } else {
-            console.log(`🔒 EXHIBIT SCRIPT: Message ${sexualMessageCount + 1} → BUTTONED COAT`);
-            setCurrentOutfit('overcoat_buttoned'); // Stage 1: Fully covered
+            // Only increment when we're in a sexual script (not just any sexual status)
+            if (scriptType === 'exhibitionism' || scriptType === 'room') {
+              console.log(`📊 Script type confirmed: ${scriptType}, proceeding with progression`);
+              // Increment count when new messages arrive
+              if (messageCount > lastMessageCount) {
+                const newSexualMessageCount = sexualMessageCount + 1;
+                setSexualMessageCount(newSexualMessageCount);
+                setLastMessageCount(messageCount);
+                console.log(`Sexual script progression: ${newSexualMessageCount}/10, Type: ${scriptType}`);
+                console.log(`Previous count: ${sexualMessageCount}, New count: ${newSexualMessageCount}`);
+                
+                // Use the updated count for outfit selection
+                // Check if this is exhibitionism script (overcoat outfit - NO ANIMATION)
+                // 3-stage progression: buttoned → open topless → fully nude
+                if (scriptType === 'exhibitionism' || (reason && reason.toLowerCase().includes('public')) || (reason && reason.toLowerCase().includes('outside'))) {
+                  // STATIC ONLY: Progressive reveal in 3 stages over 10 messages
+                  if (newSexualMessageCount >= 14) {
+                    console.log(`🔥🔥 EXHIBIT SCRIPT: Message ${newSexualMessageCount} → FULLY NUDE`);
+                    setCurrentOutfit('overcoat_nude'); // Stage 3: Fully exposed
+                  } else if (newSexualMessageCount >= 5) {
+                    console.log(`🔥 EXHIBIT SCRIPT: Message ${newSexualMessageCount} → OPEN COAT TOPLESS`);
+                    setCurrentOutfit('overcoat_open_topless'); // Stage 2: Coat open, topless
+                  } else {
+                    console.log(`🔒 EXHIBIT SCRIPT: Message ${newSexualMessageCount} → BUTTONED COAT`);
+                    setCurrentOutfit('overcoat_buttoned'); // Stage 1: Fully covered
+                  }
+                } else {
+                  // Room script (casual wear)
+                  // Progressive outfit reveal based on sexual message count over 10 messages
+                  // Messages 1-2: casual, Messages 3-6: pullshirt, Messages 7+: both revealed
+                  if (newSexualMessageCount >= 14) {
+                    console.log('Setting outfit to: casual_both (fully revealed)');
+                    setCurrentOutfit('casual_both'); // Both revealed (deeper into script)
+                  } else if (newSexualMessageCount >= 8) {
+                    console.log('Setting outfit to: casual_pullshirt (shirt pulled)');
+                    setCurrentOutfit('casual_pullshirt'); // Start with shirt pulled
+                  } else {
+                    setCurrentOutfit('casual');
+                  }
+                }
+              }
+            } else {
+              console.log(`⚠️ Sexual status but no script type detected. ScriptType: ${scriptType}, Reason: ${reason}`);
+            }
           }
-        } else {
-          // Room script (casual wear)
-          // Progressive outfit reveal based on sexual message count (10 message script)
-          // Messages 1-5: pullshirt, Messages 6+: both revealed
-          if (sexualMessageCount >= 6) {
-            console.log('Setting outfit to: casual_both (fully revealed)');
-            setCurrentOutfit('casual_both'); // Both revealed (deeper into script)
-          } else if (sexualMessageCount >= 1) {
-            console.log('Setting outfit to: casual_pullshirt (shirt pulled)');
-            setCurrentOutfit('casual_pullshirt'); // Start with shirt pulled
-          } else {
-            setCurrentOutfit('casual');
-          }
-        }
-      } else         if (status === 'casual') {
+        } else if (status === 'casual') {
           setCurrentOutfit('casual');
           if (sexualMessageCount > 0) {
             setSexualMessageCount(0);
@@ -180,11 +197,11 @@ const CharacterSprite: React.FC<CharacterSpriteProps> = ({
       case 'overcoat_open_topless':
         // Stage 2: Open coat, topless underneath
         console.log(`🔥 LOADING OPEN COAT TOPLESS`);
-        return `${basePath}/Overcoat/open_coat_topless.png`;
+        return `${basePath}/Overcoat/topless buttoned.png`;
       case 'overcoat_nude':
         // Stage 3: Fully nude/exposed
         console.log(`🔥🔥 LOADING FULLY NUDE`);
-        return `${basePath}/Casual Wear/both.png`; // Use fully exposed casual outfit
+        return `${basePath}/Overcoat/open_coat_topless.png`; // Use proper overcoat nude image
       default:
         return `${basePath}/Casual Wear/base.png`;
     }
@@ -306,7 +323,25 @@ const CharacterSprite: React.FC<CharacterSpriteProps> = ({
         <span className="name-text">Linh</span>
         <span className="mood-text">
           {!isActive && 'Waiting for you...'}
-          {isActive && energyFlags && energyFlags.status === 'sexual' && 'Feeling intimate...'}
+          {isActive && energyFlags && energyFlags.status === 'sexual' && (
+            <>
+              Feeling intimate...
+              {scriptType === 'exhibitionism' && (
+                <>
+                  {sexualMessageCount < 3 && ' (Buttoned coat)'}
+                  {sexualMessageCount >= 3 && sexualMessageCount < 7 && ' (Coat open)'}
+                  {sexualMessageCount >= 7 && ' (Fully exposed)'}
+                </>
+              )}
+              {scriptType === 'room' && (
+                <>
+                  {sexualMessageCount < 3 && ' (Casual)'}
+                  {sexualMessageCount >= 3 && sexualMessageCount < 7 && ' (Shirt pulled)'}
+                  {sexualMessageCount >= 7 && ' (Fully revealed)'}
+                </>
+              )}
+            </>
+          )}
           {isActive && energyFlags && energyFlags.status === 'teasing' && 'Playfully teasing...'}
           {isActive && energyFlags && energyFlags.status === 'casual' && 'Chatting casually'}
           {isActive && energyFlags && energyFlags.status === 'yellow' && 'A bit concerned'}

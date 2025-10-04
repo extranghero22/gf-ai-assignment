@@ -6,7 +6,11 @@ import json
 import os
 from mistralai import Mistral
 from typing import Dict, Any
+from dotenv import load_dotenv
 from energy_types import EnergySignature
+
+# Load environment variables from .env file
+load_dotenv()
 
 class LLMResponseAnalyzer:
     """LLM-powered response analysis instead of pattern matching"""

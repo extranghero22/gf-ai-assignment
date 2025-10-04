@@ -7,7 +7,11 @@ import time
 import os
 from mistralai import Mistral
 from typing import List
+from dotenv import load_dotenv
 from energy_types import EnergySignature, EnergyLevel, EnergyType, EmotionState, NervousSystemState
+
+# Load environment variables from .env file
+load_dotenv()
 
 class LLMEnergyAnalyzer:
     """LLM-powered energy analysis instead of rule-based"""
