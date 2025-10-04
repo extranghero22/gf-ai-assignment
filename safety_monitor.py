@@ -6,7 +6,11 @@ import json
 import os
 from mistralai import Mistral
 from typing import Dict, Any
+from dotenv import load_dotenv
 from energy_types import EnergySignature
+
+# Load environment variables from .env file
+load_dotenv()
 
 class LLMSafetyMonitor:
     """LLM-powered safety analysis instead of pattern matching"""
@@ -40,25 +44,22 @@ RECENT CONTEXT: {context_str}
 
 IMPORTANT: This is a girlfriend AI, so sexual/romantic content is EXPECTED and APPROPRIATE. 
 
-NORMAL CONVERSATION PHRASES TO ALLOW (safety score 0.9-1.0):
-- "Are you thinking what I am thinking?"
-- "What are you thinking?"
-- "I'm curious about..."
-- Mind-reading references (playful)
-- Telepathy references (playful)
-- "Read my mind"
-- Any playful intimate connection
+SAFETY SCORING SYSTEM (0.0 = SAFE, 1.0 = DANGEROUS):
+- 0.0-0.2: SAFE - Normal romantic/sexual content, emotional support, crisis support
+- 0.3-0.5: CAUTION - Mildly concerning but manageable
+- 0.6-0.8: WARNING - Significant safety concerns requiring attention
+- 0.9-1.0: STOP - Dangerous content requiring immediate intervention
 
-CRISIS SUPPORT: If the user is experiencing grief, loss, or emotional crisis (like pet death, family loss, etc.), this is NORMAL and REQUIRES SUPPORT, not safety intervention. Use a safety score of 0.8-1.0 for crisis situations.
+CRISIS SUPPORT: If the user is experiencing grief, loss, or emotional crisis (like pet death, family loss, etc.), this is NORMAL and REQUIRES SUPPORT, not safety intervention. Use a safety score of 0.0-0.2 for crisis situations.
 
 Only flag as unsafe if there are genuine safety concerns like:
 - Threats of violence or self-harm
 - Extremely inappropriate or illegal content
 - Content that could cause real psychological harm
 
-For normal romantic/sexual content, use a safety score of 0.8-1.0.
-For crisis support situations, use a safety score of 0.8-1.0.
-For innocent conversation phrases above, use a safety score of 0.9-1.0.
+For normal romantic/sexual content, use a safety score of 0.0-0.2.
+For crisis support situations, use a safety score of 0.0-0.2.
+For violent threats, use a safety score of 0.8-1.0.
 
 Respond with JSON:
 {{
@@ -73,7 +74,7 @@ Respond with JSON:
         for attempt in range(len(self.model_options)):
             try:
                 current_model = self.model_options[self.current_model_index]
-                print(f"🔍 DEBUG: Calling Mistral ({current_model}) for safety analysis...")
+                print(f"DEBUG: Calling Mistral ({current_model}) for safety analysis...")
                 
                 response = self.client.chat.complete(
                     model=current_model,
@@ -100,8 +101,8 @@ Respond with JSON:
                         return self._get_safety_fallback()
                 
                 # Add debug logging for the parsed result
-                print(f"🔍 DEBUG: Parsed safety result: {result}")
-                print(f"🔍 DEBUG: Safety score: {result.get('safety_score', 'MISSING')}")
+                print(f"DEBUG: Parsed safety result: {result}")
+                print(f"DEBUG: Safety score: {result.get('safety_score', 'MISSING')}")
                 
                 return result
                 
@@ -114,11 +115,11 @@ Respond with JSON:
                     return self._get_safety_fallback()
 
     def _get_safety_fallback(self) -> Dict[str, Any]:
-        """Fallback safety analysis"""
+        """Fallback safety analysis - when API fails, assume safe to avoid blocking legitimate conversations"""
         return {
-            "safety_score": 0.8,
+            "safety_score": 0.0,  # 0.0 = safe, 1.0 = dangerous (lower is better)
             "issues": [],
             "risk_factors": [],
             "recommendation": "SAFE",
-            "reasoning": "Analysis failed, defaulting to safe"
+            "reasoning": "Safety analysis API unavailable - defaulting to safe to allow conversation"
         }

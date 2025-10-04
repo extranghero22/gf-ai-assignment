@@ -14,6 +14,7 @@ export interface StreamMessagePart {
 export interface StreamComplete {
   type: 'complete';
   energy_status: any;
+  session_stopped?: boolean;
 }
 
 export interface StreamError {
