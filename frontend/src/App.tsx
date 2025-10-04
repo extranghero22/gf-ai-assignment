@@ -245,6 +245,11 @@ const App: React.FC = () => {
     }
   };
 
+  const resetApplication = () => {
+    // Refresh the entire page to reset everything
+    window.location.reload();
+  };
+
   return (
     <div className="app">
       <header className="app-header">
@@ -268,7 +273,9 @@ const App: React.FC = () => {
               onStart={startConversation}
               onStop={stopConversation}
               onGetMetrics={getMetrics}
+              onReset={resetApplication}
               sessionId={sessionId}
+              hasMessages={messages.length > 0}
             />
             
             {currentEnergyFlags && (

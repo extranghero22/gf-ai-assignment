@@ -205,13 +205,13 @@
 .name-text {
   font-size: 1.5rem;
   font-weight: 600;
-  color: #FFD700;
+  color: #000000;
   margin: 0;
 }
 
 .mood-text {
   font-size: 0.9rem;
-  color: #B0B0B0;
+  color: #000000;
   font-style: italic;
   margin: 0;
 }

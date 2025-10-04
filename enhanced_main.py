@@ -50,11 +50,13 @@ class ConversationSession:
     sexual_script_index: int = 0
     sexual_script_messages: List[str] = field(default_factory=list)
     sexual_script_type: str = ""  # Track which sexual script (room, exhibitionism, etc)
+    sexual_script_completed: bool = False  # True when sexual script has been completed in this session
     awaiting_location_choice: bool = False  # True when waiting for location response
     # Casual script tracking for frontend
     casual_script_active: bool = False
     casual_script_index: int = 0
     casual_script_messages: List[str] = field(default_factory=list)
+    casual_script_completed: bool = False  # True when casual script has been completed in this session
     casual_script_paused: bool = False  # True when user showed disinterest
 
 class EnhancedMultiAgentConversation:
@@ -731,8 +733,12 @@ class EnhancedMultiAgentConversation:
         if script_index >= len(script_messages):
             print("\n✅ Guided intimacy script completed! Generating follow-up response...")
             self.current_session.sexual_script_active = False
+            self.current_session.sexual_script_completed = True  # Mark as completed to prevent re-triggering
             self.current_session.sexual_script_index = 0
-            self.energy_flags = {"status": "green", "reason": "Script completed, generating natural follow-up", "scene": "park"}
+            
+            # Preserve the current scene instead of reverting to park
+            current_scene = self.energy_flags.get("scene", "park")
+            self.energy_flags = {"status": "green", "reason": "Script completed, generating natural follow-up", "scene": current_scene}
             
             # Generate a natural follow-up response that acknowledges the script
             # Get the last user message to respond to
@@ -887,9 +893,13 @@ class EnhancedMultiAgentConversation:
                 # User confirmed they don't want to continue
                 print("💬 User confirmed disinterest, ending casual script and generating follow-up...")
                 self.current_session.casual_script_active = False
+                self.current_session.casual_script_completed = True  # Mark as completed to prevent re-triggering
                 self.current_session.casual_script_paused = False
                 self.current_session.casual_script_index = 0
-                self.energy_flags = {"status": "green", "reason": "Script ended due to user disinterest", "scene": "park"}
+                
+                # Preserve the current scene instead of reverting to park
+                current_scene = self.energy_flags.get("scene", "park")
+                self.energy_flags = {"status": "green", "reason": "Script ended due to user disinterest", "scene": current_scene}
                 
                 # Generate a natural follow-up that moves on from the story
                 print("💬 Generating post-disinterest response...")
@@ -959,8 +969,12 @@ class EnhancedMultiAgentConversation:
         if script_index >= len(script_messages):
             print("\n✅ Casual story script completed! Generating follow-up response...")
             self.current_session.casual_script_active = False
+            self.current_session.casual_script_completed = True  # Mark as completed to prevent re-triggering
             self.current_session.casual_script_index = 0
-            self.energy_flags = {"status": "green", "reason": "Script completed, generating natural follow-up", "scene": "park"}
+            
+            # Preserve the current scene instead of reverting to park
+            current_scene = self.energy_flags.get("scene", "park")
+            self.energy_flags = {"status": "green", "reason": "Script completed, generating natural follow-up", "scene": current_scene}
             
             # Generate a natural follow-up response that acknowledges the script
             # Get the last user message to respond to
@@ -1039,6 +1053,12 @@ class EnhancedMultiAgentConversation:
 
     async def _trigger_casual_story_script(self):
         """Trigger the casual store story script using EnhancedScriptManager"""
+        
+        # PREVENT LOOPING: Don't trigger casual script if it has already been triggered or completed in this session
+        if self.current_session.casual_script_active or self.current_session.casual_script_completed:
+            print(f"🚫 Casual script already active or completed - preventing re-trigger")
+            return
+        
         print("\n💬🛍️ Starting Casual Story Time...")
         print("=" * 60)
         
@@ -1109,6 +1129,12 @@ class EnhancedMultiAgentConversation:
 
     async def _trigger_guided_intimacy_script(self):
         """Trigger the guided intimacy script - first ask for location preference"""
+        
+        # PREVENT LOOPING: Don't trigger sexual script if it has already been triggered or completed in this session
+        if self.current_session.sexual_script_active or self.current_session.sexual_script_completed:
+            print(f"🚫 Sexual script already active or completed - preventing re-trigger")
+            return
+        
         print("\n🔥💕 Initiating Guided Intimacy Experience...")
         print("=" * 60)
         
