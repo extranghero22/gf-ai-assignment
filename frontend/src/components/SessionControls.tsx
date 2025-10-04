@@ -19,11 +19,6 @@ const SessionControls: React.FC<SessionControlsProps> = ({
   return (
     <div className="session-controls">
       <div className="session-info">
-        {sessionId && (
-          <span className="session-id">
-            Session: {sessionId}
-          </span>
-        )}
         <span className={`session-status ${isActive ? 'active' : 'inactive'}`}>
           {isActive ? '🟢 Active' : '🔴 Inactive'}
         </span>

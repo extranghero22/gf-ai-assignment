@@ -16,8 +16,7 @@ transformers
 torch
 websocket-client
 flask
-flask-cors
+flask-socketio
 openai
 python-dotenv
 requests
-gunicorn

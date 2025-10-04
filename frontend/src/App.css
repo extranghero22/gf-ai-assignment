@@ -78,10 +78,7 @@
   font-size: 0.9rem;
 }
 
-.session-id {
-  color: #B0B0B0;
-  font-family: monospace;
-}
+/* Session ID styles removed - no longer displayed */
 
 .session-status {
   font-weight: 500;
@@ -546,9 +543,7 @@
     gap: 0.25rem;
   }
   
-  .session-id {
-    font-size: 0.8rem;
-  }
+  /* Session ID styles removed */
   
   .control-buttons {
     flex-direction: column;
