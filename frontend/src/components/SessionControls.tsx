@@ -6,7 +6,9 @@ interface SessionControlsProps {
   onStart: () => void;
   onStop: () => void;
   onGetMetrics: () => void;
+  onReset?: () => void;
   sessionId?: string;
+  hasMessages?: boolean;
 }
 
 const SessionControls: React.FC<SessionControlsProps> = ({
@@ -14,7 +16,9 @@ const SessionControls: React.FC<SessionControlsProps> = ({
   onStart,
   onStop,
   onGetMetrics,
-  sessionId
+  onReset,
+  sessionId,
+  hasMessages
 }) => {
   return (
     <div className="session-controls">
@@ -26,12 +30,23 @@ const SessionControls: React.FC<SessionControlsProps> = ({
       
       <div className="control-buttons">
         {!isActive ? (
-          <button 
-            onClick={onStart}
-            className="btn btn-primary"
-          >
-            🚀 Start Conversation
-          </button>
+          <>
+            <button 
+              onClick={onStart}
+              className="btn btn-primary"
+            >
+              🚀 Start Conversation
+            </button>
+            {hasMessages && onReset && (
+              <button 
+                onClick={onReset}
+                className="btn btn-secondary"
+                title="Reset and refresh the page"
+              >
+                🔄 Reset
+              </button>
+            )}
+          </>
         ) : (
           <>
             <button 

@@ -35,6 +35,11 @@ def _check_and_redirect_to_sexual_script(conversation_system):
     if not conversation_system.current_session or not conversation_system.current_session.context.messages:
         return False
     
+    # PREVENT LOOPING: Don't trigger sexual script if it has already been triggered or completed in this session
+    if conversation_system.current_session.sexual_script_active or conversation_system.current_session.sexual_script_completed:
+        print(f"🚫 Sexual script already active or completed - preventing re-trigger")
+        return False
+    
     # Get the latest message
     latest_message = conversation_system.current_session.context.messages[-1]
     
