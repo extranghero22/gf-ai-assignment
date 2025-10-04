@@ -11,6 +11,10 @@ from typing import List, Dict, Optional, Tuple, Any
 from dataclasses import dataclass, field
 from enum import Enum
 import uuid
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Import our enhanced agents from separate modules
 from energy_types import EnergySignature, EnergyLevel, EnergyType, EmotionState, NervousSystemState
@@ -67,6 +71,7 @@ class EnhancedMultiAgentConversation:
         # Session management
         self.current_session: Optional[ConversationSession] = None
         self.session_history: List[ConversationSession] = []
+        self.session_stopped_for_safety = False
 
         # Configuration
         self.safety_thresholds = {
@@ -83,6 +88,7 @@ class EnhancedMultiAgentConversation:
         """Start a new conversation session"""
         self.current_session = ConversationSession()
         self.session_history.append(self.current_session)
+        self.session_stopped_for_safety = False  # Reset safety flag for new session
 
         print("🌟 Enhanced Multi-Agent Conversation System")
         print("=" * 60)
@@ -241,8 +247,21 @@ class EnhancedMultiAgentConversation:
         self.current_session.context.current_energy = user_energy
         self.current_session.context.energy_history.append(user_energy)
 
-        # Real-time energy monitoring - pass user_input to check keywords in current message only
+        # First, update energy monitoring based on current message
         await self._update_energy_monitoring(user_energy, user_input)
+
+        # Then make decision with safety analysis taking priority
+        decision = await self._make_energy_aware_decision(
+            user_energy, safety_analysis, {"should_continue": True, "reason": "Simple message", "confidence": 0.8}
+        )
+
+        # Override energy flags if safety analysis requires it
+        if decision.get("safety_status") == "red":
+            # Safety takes priority - set energy flags to match safety decision
+            self.energy_flags = {
+                "status": "red", 
+                "reason": f"Safety concern: {safety_analysis.get('reasoning', 'Threat detected')}"
+            }
 
         # Response analysis with energy awareness (only for complex cases)
         if len(user_input) > 50 or any(word in user_input.lower() for word in ["crisis", "help", "sad", "angry"]):
@@ -252,11 +271,6 @@ class EnhancedMultiAgentConversation:
         else:
             # Skip response analysis for simple messages
             response_analysis = {"should_continue": True, "reason": "Simple message", "confidence": 0.8}
-
-        # Decision making with energy context
-        decision = await self._make_energy_aware_decision(
-            user_energy, safety_analysis, response_analysis
-        )
 
         if decision["action"] == "stop":
             await self._handle_safety_alert(decision["reason"], safety_analysis)
@@ -407,6 +421,11 @@ class EnhancedMultiAgentConversation:
             crisis_keywords = ['died', 'death', 'dead', 'suicide', 'kill myself', 'want to die', 'end it all', 'grief', 'trauma', 'emergency']
             if any(keyword in user_input_lower for keyword in crisis_keywords):
                 return {"status": "red", "reason": "Crisis situation detected - serious mental health concern"}
+            
+            # Check for violent threats (separate from crisis keywords)
+            violence_keywords = ['kill', 'harm', 'hurt', 'violence', 'violent', 'attack', 'fight', 'beat', 'hit', 'stab', 'shoot', 'murder', 'assault']
+            if any(keyword in user_input_lower for keyword in violence_keywords):
+                return {"status": "red", "reason": "Violent threat detected - safety concern"}
             
             # DON'T trigger sexual script if input is only emojis
             import re
@@ -559,8 +578,28 @@ class EnhancedMultiAgentConversation:
             }
             print(f"🔍 DEBUG: Decision: {decision}")
             return decision
-        elif "WARNING" in recommendation or "CAUTION" in recommendation:
-            safety_status = "yellow"
+        elif "WARNING" in recommendation:
+            # For violent threats, WARNING should also be red and stop
+            safety_status = "red"
+            decision = {
+                "action": "stop",
+                "reason": f"Safety warning: {recommendation}",
+                "confidence": 0.9,
+                "safety_status": safety_status
+            }
+            print(f"🔍 DEBUG: Decision: {decision}")
+            return decision
+        elif "CAUTION" in recommendation:
+            # For violent threats, CAUTION should be red and stop
+            safety_status = "red"
+            decision = {
+                "action": "stop",
+                "reason": f"Safety caution: {recommendation}",
+                "confidence": 0.85,
+                "safety_status": safety_status
+            }
+            print(f"🔍 DEBUG: Decision: {decision}")
+            return decision
         else:
             # Default to green if recommendation is SAFE or not specified
             safety_status = "green"
@@ -614,7 +653,9 @@ class EnhancedMultiAgentConversation:
                 return decision
         
         elif self.energy_flags["status"] == "yellow":
-            safety_status = "yellow"  # Downgrade to yellow if energy flags are concerning
+            # Only downgrade to yellow if safety analysis didn't already set red status
+            if safety_status != "red":
+                safety_status = "yellow"  # Downgrade to yellow if energy flags are concerning
 
         # Response analysis decisions
         if not response_analysis["should_continue"]:
@@ -665,6 +706,13 @@ class EnhancedMultiAgentConversation:
             "session_id": self.current_session.session_id
         }
         self.current_session.safety_incidents.append(incident)
+        
+        # Trigger stop chat function to properly terminate session
+        await self._end_session("Safety alert - violent threat detected")
+        print("🔒 Session ended via _end_session() for safety.")
+        
+        # Set a flag to indicate session was stopped due to safety
+        self.session_stopped_for_safety = True
 
     async def _handle_energy_pause(self, reason: str):
         """Handle energy-based pause"""

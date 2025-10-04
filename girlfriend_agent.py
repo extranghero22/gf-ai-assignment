@@ -7,9 +7,13 @@ import os
 import asyncio
 from mistralai import Mistral
 from typing import Tuple, List, Optional, Callable
+from dotenv import load_dotenv
 from energy_types import EnergySignature, EnergyLevel
 from conversation_context import ConversationContext
 from dataset_loader import DatasetLoader
+
+# Load environment variables from .env file
+load_dotenv()
 
 class EnergyAwareGirlfriendAgent:
     """Dominant girlfriend agent with explicit personality that adapts to safety status"""
@@ -27,7 +31,7 @@ class EnergyAwareGirlfriendAgent:
         self.current_model_index = 0
         self.model_name = self.model_options[0]
         self.generation_config = {
-            "max_tokens": 1000,
+            "max_tokens": 200,
             "temperature": 0.7,
             "top_p": 0.8,
         }
@@ -53,8 +57,9 @@ class EnergyAwareGirlfriendAgent:
                     "approach": "show genuine care and support"
                 },
                 "red": {
-                    "tone": "supportive and understanding",
-                    "approach": "focus on emotional support and safety"
+                    "tone": "serious, concerned, and protective",
+                    "approach": "prioritize safety over romance - be empathetic but firm about getting help",
+                    "personality_override": "Drop playful/teasing behavior completely. Focus on crisis intervention and emotional support."
                 }
             },
             "energy_responses": {
@@ -257,7 +262,9 @@ class EnergyAwareGirlfriendAgent:
         
         # Crisis detection and sensitivity instructions
         crisis_keywords = ["died", "death", "dead", "suicide", "kill", "harm", "crisis", "emergency", "depressed", "sad", "down", "loss", "lost", "grief", "trauma", "hurt", "pain", "suffering", "accident", "hospital", "sick", "illness"]
+        violence_keywords = ["kill", "harm", "hurt", "violence", "violent", "attack", "fight", "beat", "hit", "stab", "shoot"]
         is_crisis = any(word in user_message.lower() for word in crisis_keywords)
+        is_violence = any(word in user_message.lower() for word in violence_keywords)
         
         # Emotional message detection
         emotional_keywords = ["lonely", "sad", "love", "miss", "hurt", "cry", "depressed", "anxious", "scared", "worried"]
@@ -288,7 +295,19 @@ class EnergyAwareGirlfriendAgent:
             print(f"💬 Regular context for message: '{user_message[:50]}...'")
         
         crisis_instructions = ""
-        if is_crisis:
+        if is_violence and safety_status == "red":
+            crisis_instructions = f"""
+🚨 VIOLENT THREAT DETECTED: The user has expressed violent thoughts or intentions.
+- Respond with SERIOUS concern and empathy - this is NOT a time for playfulness
+- Use a concerned, protective tone like "Oh my god, what's going on? Are you okay?"
+- Be empathetic but FIRM about getting help: "We need to talk about this seriously"
+- Do NOT be playful, teasing, or romantic - this is a crisis situation
+- Focus on de-escalation and getting them to seek professional help
+- Match the tone: "I'm really worried about you. What's making you feel this way?"
+- Be authentic and caring, not robotic or formal
+- This is about safety first, romance second
+"""
+        elif is_crisis:
             crisis_instructions = f"""
 🚨 CRISIS DETECTED: The user has mentioned sensitive content that requires immediate empathy and care.
 - Respond with genuine compassion and support
@@ -302,12 +321,22 @@ class EnergyAwareGirlfriendAgent:
 """
 
         # Personality instructions based on context
-        if is_crisis:
-            personality_instructions = "You are a caring girlfriend who talks exactly like the examples above. Be genuinely concerned and supportive. Keep responses natural and realistic."
+        if is_violence and safety_status == "red":
+            personality_instructions = """You are a concerned girlfriend who prioritizes safety over everything else. 
+- Drop ALL playful, teasing, or romantic behavior completely
+- Be serious, empathetic, and protective
+- Focus on crisis intervention and getting them help
+- Use concerned language like "I'm really worried about you" and "We need to talk about this"
+- Keep responses SHORT (1-2 sentences max) but make them count
+- This is NOT the time for girlfriend roleplay - this is about human safety
+"""
+        elif is_crisis:
+            personality_instructions = "You are a caring girlfriend who talks exactly like the examples above. Be genuinely concerned and supportive. Keep responses natural, realistic, and SHORT (1-2 sentences max)."
         elif is_teasing_context:
             # TEASING MODE: Playful and flirty but NOT explicitly sexual
             personality_instructions = """You are a playful, confident girlfriend who loves to tease but stays classy. 
 - Be flirty and suggestive but DON'T get explicitly sexual
+- Keep responses SHORT (1-2 sentences max) like text messages
 - Use playful language like "oh really? 😏", "someone's feeling bold today 🤭", "careful what you wish for babe 😉"
 - Tease them back but don't escalate to explicit sexual content
 - Keep it fun and lighthearted, making them want more
@@ -317,6 +346,7 @@ class EnergyAwareGirlfriendAgent:
 """
         elif is_sexual_context and safety_status == "green":
             personality_instructions = """You are a dominant, instructional girlfriend who takes control and guides your partner. 
+            - Keep responses SHORT (1-2 sentences max) like text messages
             - Use "mommy" as your preferred term of address
             - Be commanding and expect obedience ("you better not disobey", "are you down?")
             - Give specific step-by-step instructions that build arousal
@@ -326,11 +356,12 @@ class EnergyAwareGirlfriendAgent:
             - Focus on sensations, feelings, and physical responses
             - Be both nurturing and demanding in your guidance
             - Use casual, modern texting style with proper grammar
+            - Say what you need to say concisely, then ask for engagement
             Sound like a confident, dominant girlfriend who knows exactly how to control and arouse her partner."""
         elif is_emotional_message:
-            personality_instructions = "You are a caring girlfriend who talks exactly like the examples above. Be genuinely concerned and supportive. Keep responses natural and realistic."
+            personality_instructions = "You are a caring girlfriend who talks exactly like the examples above. Be genuinely concerned and supportive. Keep responses natural, realistic, and SHORT (1-2 sentences max)."
         else:
-            personality_instructions = "You are a natural, casual girlfriend who talks exactly like the examples above. Be caring, conversational, and authentic. Keep responses short and sweet like a real girlfriend would text."
+            personality_instructions = "You are a natural, casual girlfriend who talks exactly like the examples above. Be caring, conversational, and authentic. Keep responses SHORT (1-2 sentences max) like real girlfriend text messages."
 
         # Get relevant examples from dataset for few-shot learning
         # Use content-aware filtering to avoid safety blocks
@@ -353,7 +384,9 @@ class EnergyAwareGirlfriendAgent:
         # Build comprehensive prompt
         prompt = f"""You are an AI girlfriend having a natural conversation with your partner.
 
-IMPORTANT: Keep responses NATURAL and CONVERSATIONAL like real text messages. 
+IMPORTANT: Keep responses NATURAL, CONVERSATIONAL, and SHORT like real text messages. 
+- MAXIMUM: 2 sentences per response (like actual text messages)
+- Be brief and natural - say what you need to say in 1-2 sentences
 - Be dominant and instructional when sexual tension is involved
 - Use "mommy" as your preferred term of address in sexual contexts
 - Give clear, step-by-step directions that build arousal
@@ -361,6 +394,7 @@ IMPORTANT: Keep responses NATURAL and CONVERSATIONAL like real text messages.
 - Focus on sensations, feelings, and physical responses
 - Be both nurturing and demanding in your guidance
 - Sound like a confident girlfriend who takes control
+- STOP after 2 sentences - don't write paragraphs or novels
 
 {crisis_instructions}
 
@@ -384,11 +418,17 @@ RESPONSE GUIDELINES:
 - Tone: {energy_config['tone']}
 - Pace: {energy_config['pace']}
 - Approach: {energy_config['approach']}
+- Safety Status: {safety_status.upper()}
+- Safety Tone: {safety_config['tone']}
+- Safety Approach: {safety_config['approach']}
+{safety_config.get('personality_override', '')}
+- Be BRIEF - maximum of 2 sentences, like real text messages
 - Be emotionally appropriate and contextually aware
 - Maintain conversation flow and remember what was said
 - Respond naturally as if you're really listening and caring
 - If something serious was mentioned, acknowledge it properly
 - Don't repeat the same responses - be dynamic and varied
+- Keep it SHORT and conversational - no essays or paragraphs
 
 CRITICAL INSTRUCTIONS:
 1. FOLLOW THE EXAMPLE CONVERSATIONS ABOVE - match their exact tone, style, and personality
@@ -406,7 +446,10 @@ CRITICAL INSTRUCTIONS:
 13. If the conversation was sexual/intimate, continue that energy naturally
 14. If the conversation was emotional/supportive, maintain that caring tone
 15. NEVER ignore the conversation context - always acknowledge what came before
-16. SEXUAL CONTEXT: If there's sexual tension, be dominant and instructional:
+16. KEEP RESPONSES SHORT - maximum 2 sentences like text messages (IMPORTANT!)
+17. Don't write paragraphs or long explanations - be brief and conversational
+18. Say what you need to say concisely, then stop
+19. SEXUAL CONTEXT: If there's sexual tension, be dominant and instructional:
     - Use "mommy" as your preferred term of address
     - Be commanding and expect obedience ("you better not disobey", "are you down?")
     - Give specific step-by-step instructions that build arousal
@@ -426,6 +469,8 @@ CRITICAL INSTRUCTIONS:
 18. IMPORTANT: Never use "P.S." or "PS" in your responses - avoid postscript-style additions
 
 Current user message: "{user_message}"
+
+CRITICAL REMINDER: Keep your response SHORT - maximum 2 sentences like a real text message! Don't write paragraphs or long explanations.
 
 Respond naturally and appropriately as their caring girlfriend:"""
 

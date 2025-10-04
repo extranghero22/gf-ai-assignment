@@ -13,10 +13,11 @@
   min-width: 300px;
   max-width: 500px;
   height: fit-content;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
   transition: all 0.3s ease;
   position: relative;
   overflow: hidden;
+  background: #2C2C2C;
 }
 
 /* Blurred background layer */
@@ -204,13 +205,13 @@
 .name-text {
   font-size: 1.5rem;
   font-weight: 600;
-  color: #667eea;
+  color: #FFD700;
   margin: 0;
 }
 
 .mood-text {
   font-size: 0.9rem;
-  color: #6c757d;
+  color: #B0B0B0;
   font-style: italic;
   margin: 0;
 }
@@ -245,7 +246,69 @@
 
 @media (max-width: 768px) {
   .character-sprite-container {
-    display: none; /* Hide on mobile to save space */
+    min-width: 200px;
+    max-width: 250px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+  }
+  
+  .sprite-wrapper {
+    max-width: 200px;
+    height: 300px;
+  }
+  
+  .name-text {
+    font-size: 1.1rem;
+  }
+  
+  .mood-text {
+    font-size: 0.8rem;
+  }
+}
+
+/* Enhanced Mobile Character Sprite */
+@media (max-width: 480px) {
+  .character-sprite-container {
+    min-width: 150px;
+    max-width: 200px;
+    padding: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+  
+  .sprite-wrapper {
+    max-width: 150px;
+    height: 250px;
+  }
+  
+  .name-text {
+    font-size: 1rem;
+  }
+  
+  .mood-text {
+    font-size: 0.75rem;
+  }
+}
+
+/* Ultra-small screens */
+@media (max-width: 360px) {
+  .character-sprite-container {
+    min-width: 120px;
+    max-width: 150px;
+    padding: 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+  
+  .sprite-wrapper {
+    max-width: 120px;
+    height: 200px;
+  }
+  
+  .name-text {
+    font-size: 0.9rem;
+  }
+  
+  .mood-text {
+    font-size: 0.7rem;
   }
 }
 

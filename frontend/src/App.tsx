@@ -177,10 +177,22 @@ const App: React.FC = () => {
             if (complete.energy_status.status === 'red' && 
                 (complete.energy_status.reason.includes('crisis') || 
                  complete.energy_status.reason.includes('mental health') ||
-                 complete.energy_status.reason.includes('extreme sadness'))) {
+                 complete.energy_status.reason.includes('extreme sadness') ||
+                 complete.energy_status.reason.includes('Violent threat') ||
+                 complete.energy_status.reason.includes('violence') ||
+                 complete.energy_status.reason.includes('safety concern'))) {
               setCrisisToastReason(complete.energy_status.reason);
               setShowCrisisToast(true);
             }
+          }
+          
+          // Check if session was stopped due to safety concerns
+          if ((complete as any).session_stopped) {
+            console.log('Session stopped due to safety concerns - stopping chat automatically');
+            setIsActive(false);
+            setSessionId(undefined);
+            setCrisisToastReason('Session terminated due to safety concerns');
+            setShowCrisisToast(true);
           }
           
           // Start the typing simulation with collected messages
@@ -207,7 +219,16 @@ const App: React.FC = () => {
 
     } catch (error) {
       console.error('Error sending message:', error);
-      setError('Failed to send message. Please try again.');
+      
+      // Check if session was stopped due to safety concerns
+      if (error instanceof Error && error.message.includes('Session has been stopped')) {
+        setCrisisToastReason('Session terminated due to safety concerns');
+        setShowCrisisToast(true);
+        setError('Session terminated due to safety concerns. Please start a new conversation.');
+      } else {
+        setError('Failed to send message. Please try again.');
+      }
+      
       setIsStreaming(false);
       setCurrentStreamingMessage('');
     }
@@ -227,8 +248,8 @@ const App: React.FC = () => {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>🌟 AI Girlfriend Chat</h1>
-        <p>Energy-Aware Conversation System</p>
+        <h1> Date Linh </h1>
+        <p>AI Chat with Linh</p>
       </header>
 
       <main className="app-main">
