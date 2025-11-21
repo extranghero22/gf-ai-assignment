@@ -339,20 +339,25 @@ def send_message_stream():
                         
                         # Handle single messages normally
                         print(f"🔵 Sending message {msg_idx + 1}/{len(agent_messages)}: {full_response[:100]}...")
-                        
-                        # Use message splitter to create intelligent sequence based on content
-                        # Determine context from the conversation
-                        context = "general"
-                        if conversation_system.energy_flags:
-                            if any(flag in conversation_system.energy_flags for flag in ["sexual", "intimate"]):
-                                context = "sexual"
-                            elif any(flag in conversation_system.energy_flags for flag in ["crisis", "emotional"]):
-                                context = "crisis"
-                            elif any(flag in conversation_system.energy_flags for flag in ["supportive", "caring"]):
-                                context = "emotional"
-                        
-                        message_parts = message_splitter.split_message(full_response, context)
-                        print(f"🔵 Split into {len(message_parts)} parts for {context} content")
+
+                        # Use pre-split message_chunks if available (already split by girlfriend agent)
+                        if 'message_chunks' in agent_msg and agent_msg['message_chunks']:
+                            message_parts = agent_msg['message_chunks']
+                            print(f"🔵 Using pre-split chunks: {len(message_parts)} parts")
+                        else:
+                            # Fallback: Use message splitter to create intelligent sequence based on content
+                            # Determine context from the conversation
+                            context = "general"
+                            if conversation_system.energy_flags:
+                                if any(flag in conversation_system.energy_flags for flag in ["sexual", "intimate"]):
+                                    context = "sexual"
+                                elif any(flag in conversation_system.energy_flags for flag in ["crisis", "emotional"]):
+                                    context = "crisis"
+                                elif any(flag in conversation_system.energy_flags for flag in ["supportive", "caring"]):
+                                    context = "emotional"
+
+                            message_parts = message_splitter.split_message(full_response, context)
+                            print(f"🔵 Fallback split into {len(message_parts)} parts for {context} content")
                         
                         # Send each part with calculated delays
                         for i, part in enumerate(message_parts):
@@ -362,15 +367,14 @@ def send_message_stream():
                                 "index": i,
                                 "total": len(message_parts),
                                 "is_typing": False,
-                                "delay": part.delay,
-                                "part_type": part.type
+                                "delay": part.delay_before,
                             }
-                            print(f"🔵 Part {i+1} ({part.type}, delay: {part.delay}s): {part.content[:50]}...")
+                            print(f"🔵 Part {i+1} (delay: {part.delay_before}s): {part.content[:50]}...")
                             yield f"data: {json.dumps(event_data)}\n\n"
-                            
+
                             # Add delay between parts (except for the last one)
                             if i < len(message_parts) - 1:
-                                time.sleep(part.delay)
+                                time.sleep(part.delay_before)
                     
                     # Send completion event
                     completion_data = {

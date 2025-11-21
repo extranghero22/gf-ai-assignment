@@ -24,6 +24,7 @@ from safety_monitor import LLMSafetyMonitor
 from response_analyzer import LLMResponseAnalyzer
 from girlfriend_agent import EnergyAwareGirlfriendAgent
 from enhanced_script_manager import EnhancedScriptManager, ScenarioScript, ScenarioType
+from message_routing_agent import LLMMessageRoutingAgent
 
 class ConversationState(Enum):
     ACTIVE = "active"
@@ -65,7 +66,8 @@ class EnhancedMultiAgentConversation:
     def __init__(self):
         # Initialize LLM-powered components
         self.energy_analyzer = LLMEnergyAnalyzer()
-        self.girlfriend_agent = EnergyAwareGirlfriendAgent(self.energy_analyzer)
+        self.routing_agent = LLMMessageRoutingAgent()
+        self.girlfriend_agent = EnergyAwareGirlfriendAgent(self.energy_analyzer, self.routing_agent)
         self.safety_monitor = LLMSafetyMonitor()
         self.response_analyzer = LLMResponseAnalyzer()
         self.script_manager = EnhancedScriptManager()
@@ -97,6 +99,7 @@ class EnhancedMultiAgentConversation:
         print("🤖 Energy-Aware Girlfriend Agent: Online")
         print("🛡️  Advanced Safety Monitor: Active")
         print("📊 Energy Analyzer: Monitoring")
+        print("🎯 Message Routing Agent: Active")
         print("🎭 Scenario Manager: Ready")
         print("=" * 60)
         print(f"📋 Session ID: {self.current_session.session_id}")
@@ -280,17 +283,18 @@ class EnhancedMultiAgentConversation:
         elif decision["action"] == "pause":
             await self._handle_energy_pause(decision["reason"])
             return
-        elif decision["action"] == "trigger_sexual_script":
-            # Trigger guided intimacy script automatically
-            await self._trigger_guided_intimacy_script()
-            return
-        elif decision["action"] == "trigger_casual_script":
-            # Trigger casual story script automatically
-            await self._trigger_casual_story_script()
-            return
-        elif decision["action"] == "continue":
+        # TEMPORARILY DISABLED FOR ROUTING AGENT TESTING
+        # elif decision["action"] == "trigger_sexual_script":
+        #     # Trigger guided intimacy script automatically
+        #     await self._trigger_guided_intimacy_script()
+        #     return
+        # elif decision["action"] == "trigger_casual_script":
+        #     # Trigger casual story script automatically
+        #     await self._trigger_casual_story_script()
+        #     return
+        elif decision["action"] == "continue" or decision["action"] == "trigger_sexual_script" or decision["action"] == "trigger_casual_script":
             # Generate energy-aware response with safety gating
-            response_content, response_energy = await self.girlfriend_agent.generate_response(
+            response_content, response_energy, message_chunks = await self.girlfriend_agent.generate_response(
                 self.current_session.context, user_input, decision.get("safety_status", "green")
             )
 
@@ -299,7 +303,8 @@ class EnhancedMultiAgentConversation:
                 "role": "agent",
                 "content": response_content,
                 "timestamp": time.time(),
-                "energy_signature": response_energy
+                "energy_signature": response_energy,
+                "message_chunks": message_chunks  # Store chunks for API access
             }
 
             self.current_session.context.messages.append(response_message)
@@ -308,9 +313,8 @@ class EnhancedMultiAgentConversation:
             self.current_session.context.energy_history.append(response_energy)
             self.current_session.context.current_energy = response_energy
 
-            # Display response with energy indicators
-            energy_emoji = await self._get_energy_emoji(response_energy.energy_level if response_energy else EnergyLevel.MEDIUM)
-            print(f"\n{energy_emoji} {response_content}")
+            # Display response with energy indicators and message splitting
+            await self._send_message_chunks(message_chunks, response_energy)
 
             # Show energy status
             if self.energy_flags["status"] != "green":
@@ -679,6 +683,28 @@ class EnhancedMultiAgentConversation:
         print(f"🔍 DEBUG: Decision: {decision}")
         return decision
 
+    async def _send_message_chunks(self, message_chunks, response_energy):
+        """Send message chunks with realistic typing delays"""
+        from message_splitter_agent import MessageChunk
+
+        # Get energy emoji for display
+        energy_emoji = await self._get_energy_emoji(response_energy.energy_level if response_energy else EnergyLevel.MEDIUM)
+
+        # If single chunk, send immediately without delay
+        if len(message_chunks) == 1:
+            print(f"\n{energy_emoji} {message_chunks[0].content}")
+            return
+
+        # Multiple chunks - send with delays
+        print(f"\n💬 Sending {len(message_chunks)} messages...")
+        for i, chunk in enumerate(message_chunks):
+            # Wait before sending (except first chunk)
+            if chunk.delay_before > 0:
+                await asyncio.sleep(chunk.delay_before)
+
+            # Display chunk
+            print(f"{energy_emoji} {chunk.content}")
+
     async def _get_energy_emoji(self, energy_level: EnergyLevel) -> str:
         """Get emoji representation for energy level"""
         emoji_map = {
@@ -751,8 +777,8 @@ class EnhancedMultiAgentConversation:
             
             # Generate AI response with full script context
             print("🔥 Generating post-script response with full context...")
-            response_content, response_energy = await self.girlfriend_agent.generate_response(
-                self.current_session.context, 
+            response_content, response_energy, message_chunks = await self.girlfriend_agent.generate_response(
+                self.current_session.context,
                 last_user_msg if last_user_msg else "continue conversation naturally",
                 "green"
             )
@@ -767,10 +793,12 @@ class EnhancedMultiAgentConversation:
             }
             self.current_session.context.messages.append(response_message)
             self.current_session.context.energy_history.append(response_energy)
-            
-            print(f"✅ Post-script response generated: {response_content[:100]}...")
+
+            # Send message chunks with delays
+            await self._send_message_chunks(message_chunks, response_energy)
+            print(f"✅ Post-script response sent")
             return
-        
+
         # Get next message
         next_message = script_messages[script_index]
         print(f"🔥 [Script {script_index + 1}/{len(script_messages)}]: {next_message[:50]}...")
@@ -903,8 +931,8 @@ class EnhancedMultiAgentConversation:
                 
                 # Generate a natural follow-up that moves on from the story
                 print("💬 Generating post-disinterest response...")
-                response_content, response_energy = await self.girlfriend_agent.generate_response(
-                    self.current_session.context, 
+                response_content, response_energy, message_chunks = await self.girlfriend_agent.generate_response(
+                    self.current_session.context,
                     last_user_msg if last_user_msg else "continue conversation naturally",
                     "green"
                 )
@@ -919,8 +947,10 @@ class EnhancedMultiAgentConversation:
                 }
                 self.current_session.context.messages.append(response_message)
                 self.current_session.context.energy_history.append(response_energy)
-                
-                print(f"✅ Post-disinterest response generated: {response_content[:100]}...")
+
+                # Send message chunks with delays
+                await self._send_message_chunks(message_chunks, response_energy)
+                print(f"✅ Post-disinterest response sent")
                 return
         
         # Check for disinterest signals (only after message 3, give them time to engage)
@@ -987,12 +1017,12 @@ class EnhancedMultiAgentConversation:
             
             # Generate AI response with full script context
             print("💬 Generating post-script response with full context...")
-            response_content, response_energy = await self.girlfriend_agent.generate_response(
-                self.current_session.context, 
+            response_content, response_energy, message_chunks = await self.girlfriend_agent.generate_response(
+                self.current_session.context,
                 last_user_msg if last_user_msg else "continue conversation naturally",
                 "green"
             )
-            
+
             # Record response
             response_message = {
                 "role": "agent",
@@ -1003,10 +1033,12 @@ class EnhancedMultiAgentConversation:
             }
             self.current_session.context.messages.append(response_message)
             self.current_session.context.energy_history.append(response_energy)
-            
-            print(f"✅ Post-script response generated: {response_content[:100]}...")
+
+            # Send message chunks with delays
+            await self._send_message_chunks(message_chunks, response_energy)
+            print(f"✅ Post-script response sent")
             return
-        
+
         # Get next message (can be string or list of strings for grouped messages)
         next_message_item = script_messages[script_index]
         
