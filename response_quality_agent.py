@@ -40,8 +40,7 @@ class ResponseQualityAgent:
         self.model_options = [
             "gpt-4o-mini",
             "gpt-4o",
-            "gpt-3.5-turbo",
-            "gpt-5-nano"
+            "gpt-3.5-turbo"
         ]
         self.current_model_index = 0
 
@@ -91,11 +90,11 @@ class ResponseQualityAgent:
 
         # Log quality check result
         if passed:
-            print(f"✅ Quality Check: PASSED - Response matches Hyunnie's personality and routing")
+            print(f" Quality Check: PASSED - Response matches Hyunnie's personality and routing")
         else:
-            print(f"⚠️ Quality Check: FAILED ({severity}) - Issues: {', '.join(issues[:3])}")
+            print(f" Quality Check: FAILED ({severity}) - Issues: {', '.join(issues[:3])}")
             if needs_adjustment:
-                print(f"🔧 Recommendation: {recommendation}")
+                print(f" Recommendation: {recommendation}")
 
         return result
 
@@ -130,8 +129,8 @@ ROUTING PATH REQUIREMENTS:
 {self._get_routing_requirements(routing_path)}
 
 KNOWLEDGE BOUNDARIES CHECK:
-❌ Hyunnie DOESN'T know: {', '.join(HyunniePersona.KNOWLEDGE_BOUNDARIES['unknown_topics'][:10])}...
-✅ Hyunnie KNOWS: {', '.join(HyunniePersona.KNOWLEDGE_BOUNDARIES['known_topics'][:10])}...
+ Hyunnie DOESN'T know: {', '.join(HyunniePersona.KNOWLEDGE_BOUNDARIES['unknown_topics'][:10])}...
+ Hyunnie KNOWS: {', '.join(HyunniePersona.KNOWLEDGE_BOUNDARIES['known_topics'][:10])}...
 
 QUALITY CHECKS TO PERFORM:
 
@@ -148,9 +147,9 @@ QUALITY CHECKS TO PERFORM:
    - PATH_B should show genuine confusion about complex topics
    - PATH_E should focus on herself dramatically
    - PATH_F should show strong emotion
-   - PATH_G should show jealousy/possessiveness (use "MY man/baby", 🤨 emoji)
-   - PATH_I should playfully tease/challenge (use 😏, 🤭, 😈 emojis)
-   - PATH_L should show vulnerability/seek reassurance (use 🥺 emoji)
+   - PATH_G should show jealousy/possessiveness (use "MY man/baby",  emoji)
+   - PATH_I should playfully tease/challenge (use , ,  emojis)
+   - PATH_L should show vulnerability/seek reassurance (use  emoji)
    - PATH_M should firmly maintain boundaries while staying sweet
 
 3. KNOWLEDGE BOUNDARIES:
@@ -166,7 +165,7 @@ QUALITY CHECKS TO PERFORM:
 
 5. LENGTH COMPLIANCE:
    - PATH_D: Must be 1-2 ACTUAL WORDS (emojis and punctuation are encouraged and don't count toward word limit)
-   - Examples of VALID PATH_D: "nice 💪", "cool", "ok", "bored? 😏💕", "hmm 🤔"
+   - Examples of VALID PATH_D: "nice ", "cool", "ok", "bored? ", "hmm "
    - Other paths: Should be brief (1-2 sentences max like text messages)
    - Not too long or essay-like?
 
@@ -175,8 +174,8 @@ QUALITY CHECKS TO PERFORM:
    - Sexual context: Is she dominant and confident (uses "mommy")?
    - Casual context: Is she playful and authentic?
 
-⚠️ IMPORTANT PASS THRESHOLD FOR PATH_D:
-If the response is PATH_D and contains 1-2 actual words (not counting emojis/punctuation), it should PASS even if personality seems minimal. Brevity is the primary requirement for PATH_D. Examples like "bored? 😏💕", "nice 💪", "cool", "ok" are all VALID and should PASS.
+ IMPORTANT PASS THRESHOLD FOR PATH_D:
+If the response is PATH_D and contains 1-2 actual words (not counting emojis/punctuation), it should PASS even if personality seems minimal. Brevity is the primary requirement for PATH_D. Examples like "bored? ", "nice ", "cool", "ok" are all VALID and should PASS.
 
 Respond with JSON:
 {{
@@ -201,13 +200,13 @@ Respond with JSON:
             "PATH_A": "Normal response - Be authentic and engaged",
             "PATH_B": "Show genuine confusion - Use phrases like 'idk babe', 'what? lol', 'that's too deep for me'",
             "PATH_C": "Deflect gently - Redirect to herself or ask about their day",
-            "PATH_D": "1-2 ACTUAL WORDS (emojis/punctuation don't count). Valid examples: 'nice 💪', 'cool', 'ok', 'bored? 😏💕', 'hmm 🤔'. Can be playful or neutral.",
+            "PATH_D": "1-2 ACTUAL WORDS (emojis/punctuation don't count). Valid examples: 'nice ', 'cool', 'ok', 'bored? ', 'hmm '. Can be playful or neutral.",
             "PATH_E": "Ignore their topic - Focus dramatically on herself (Earl Grey, coffee, mishaps)",
             "PATH_F": "Show strong emotion - Be expressive and dramatic about feelings",
-            "PATH_G": "Show jealousy and possessiveness - Be dramatic about them being YOURS. Use 'MY man/my baby', 🤨 emoji. Examples: 'excuse me? 🤨 who is she'",
-            "PATH_I": "Playful teasing - Challenge them confidently. Use 😏, 🤭, 😈 emojis. Examples: 'oh really? 😏 prove it baby'",
-            "PATH_L": "Show vulnerability - Seek reassurance and validation. Use 🥺 emoji. Examples: 'you really think so? 🥺 sometimes I feel like I'm not enough'",
-            "PATH_M": "Firm boundaries - Clear but sweet boundary setting. Use 'you know I can't' phrases. Examples: 'babe you know I can't do that 💕 but I like what we have'",
+            "PATH_G": "Show jealousy and possessiveness - Be dramatic about them being YOURS. Use 'MY man/my baby',  emoji. Examples: 'excuse me?  who is she'",
+            "PATH_I": "Playful teasing - Challenge them confidently. Use , ,  emojis. Examples: 'oh really?  prove it baby'",
+            "PATH_L": "Show vulnerability - Seek reassurance and validation. Use  emoji. Examples: 'you really think so?  sometimes I feel like I'm not enough'",
+            "PATH_M": "Firm boundaries - Clear but sweet boundary setting. Use 'you know I can't' phrases. Examples: 'babe you know I can't do that  but I like what we have'",
             "NONE": "No specific routing - Follow general personality"
         }
 
@@ -220,7 +219,7 @@ Respond with JSON:
         for attempt in range(len(self.model_options)):
             try:
                 current_model = self.model_options[self.current_model_index]
-                print(f"🔍 Quality Check: Calling OpenAI ({current_model})...")
+                print(f" Quality Check: Calling OpenAI ({current_model})...")
 
                 # GPT-5 nano only supports default temperature=1
                 response = self.client.chat.completions.create(
@@ -232,7 +231,7 @@ Respond with JSON:
                 response_text = response.choices[0].message.content.strip()
 
                 if not response_text:
-                    print("⚠️ Empty quality check response, using fallback")
+                    print(" Empty quality check response, using fallback")
                     return self._get_quality_fallback("pass")
 
                 # Try to extract JSON
@@ -244,10 +243,10 @@ Respond with JSON:
                     if json_match:
                         result = json.loads(json_match.group())
                     else:
-                        print(f"⚠️ No valid JSON in quality check: '{response_text}'")
+                        print(f" No valid JSON in quality check: '{response_text}'")
                         return self._get_quality_fallback("pass")
 
-                print(f"🔍 Quality: {result.get('overall_quality', 'unknown')} - {result.get('reasoning', '')[:80]}...")
+                print(f" Quality: {result.get('overall_quality', 'unknown')} - {result.get('reasoning', '')[:80]}...")
                 return result
 
             except Exception as e:
@@ -298,10 +297,10 @@ Respond with JSON:
             return response
 
         if self.adjustment_agent is None:
-            print("⚠️ Adjustment agent not available - returning original response")
+            print(" Adjustment agent not available - returning original response")
             return response
 
-        print(f"🔧 Invoking adjustment agent to fix: {', '.join(quality_result.issues[:2])}")
+        print(f" Invoking adjustment agent to fix: {', '.join(quality_result.issues[:2])}")
 
         # Call adjustment agent (to be implemented later)
         adjusted_response = await self.adjustment_agent.adjust_response(
@@ -312,10 +311,10 @@ Respond with JSON:
             context=context
         )
 
-        print(f"🔧 Adjustment: '{response[:40]}...' → '{adjusted_response[:40]}...'")
+        print(f" Adjustment: '{response[:40]}...'   '{adjusted_response[:40]}...'")
         return adjusted_response
 
     def set_adjustment_agent(self, adjustment_agent):
         """Set the adjustment agent (will be created later)"""
         self.adjustment_agent = adjustment_agent
-        print("✅ Response Adjustment Agent linked to Quality Agent")
+        print(" Response Adjustment Agent linked to Quality Agent")

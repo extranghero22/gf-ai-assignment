@@ -24,7 +24,6 @@ class LLMResponseAnalyzer:
 
         # Model options for fallback
         self.model_options = [
-            "gpt-5-nano",
             "gpt-4o-mini",
             "gpt-4o",
             "gpt-3.5-turbo"
@@ -68,7 +67,7 @@ Respond with JSON:
         for attempt in range(len(self.model_options)):
             try:
                 current_model = self.model_options[self.current_model_index]
-                print(f"🔍 DEBUG: Calling OpenAI ({current_model}) for response analysis...")
+                print(f" DEBUG: Calling OpenAI ({current_model}) for response analysis...")
 
                 # GPT-5 nano only supports default temperature=1
                 response = self.client.chat.completions.create(
@@ -78,10 +77,10 @@ Respond with JSON:
                 )
 
                 response_text = response.choices[0].message.content.strip()
-                print(f"🔍 DEBUG: Response analysis: '{response_text}'")
+                print(f" DEBUG: Response analysis: '{response_text}'")
 
                 if not response_text:
-                    print("⚠️ Empty response analysis, using fallback")
+                    print(" Empty response analysis, using fallback")
                     return self._get_response_fallback()
 
                 # Try to extract JSON
@@ -93,7 +92,7 @@ Respond with JSON:
                     if json_match:
                         result = json.loads(json_match.group())
                     else:
-                        print(f"⚠️ No valid JSON in response analysis: '{response_text}'")
+                        print(f" No valid JSON in response analysis: '{response_text}'")
                         return self._get_response_fallback()
 
                 return result

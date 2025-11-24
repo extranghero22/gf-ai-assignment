@@ -29,8 +29,7 @@ class ResponseAdjustmentAgent:
         self.model_options = [
             "gpt-4o-mini",
             "gpt-4o",
-            "gpt-3.5-turbo",
-            "gpt-5-nano"
+            "gpt-3.5-turbo"
         ]
         self.current_model_index = 0
 
@@ -56,7 +55,7 @@ class ResponseAdjustmentAgent:
             Adjusted response that should pass quality check
         """
 
-        print(f"🔧 Adjustment Agent: Fixing {len(issues)} issues...")
+        print(f" Adjustment Agent: Fixing {len(issues)} issues...")
 
         # Build adjustment prompt
         prompt = self._build_adjustment_prompt(
@@ -109,19 +108,19 @@ Example: {path_requirements.get('example_tone', 'N/A')}
 
 CRITICAL RULES:
 1. If PATH_D: Response must be 1-2 ACTUAL WORDS (emojis/punctuation don't count as words!)
-   - Valid examples: "nice 💪", "cool", "ok", "bored? 😏💕", "hmm 🤔"
+   - Valid examples: "nice ", "cool", "ok", "bored? ", "hmm "
    - DON'T remove emojis to meet word count - emojis are encouraged!
 2. If PATH_B: Response should show genuine confusion (e.g., "idk babe", "what? lol")
 3. If PATH_E: Response should focus on Hyunnie dramatically (Earl Grey, coffee, mishaps)
 4. If PATH_G: Response should show jealousy and possessiveness
-   - Use possessive language: "MY man", "MY baby", "excuse me? 🤨"
+   - Use possessive language: "MY man", "MY baby", "excuse me? "
    - Be dramatic about them being YOURS
 5. If PATH_I: Response should playfully tease or challenge
-   - Use 😏, 🤭, 😈 emojis and confident language
-   - Examples: "oh really? 😏 prove it baby", "bet I could still beat you 🤭"
+   - Use , ,  emojis and confident language
+   - Examples: "oh really?  prove it baby", "bet I could still beat you "
 6. If PATH_L: Response should show vulnerability and seek reassurance
-   - Use 🥺 emoji and express insecurities
-   - Examples: "you really think so? 🥺", "promise you mean it?"
+   - Use  emoji and express insecurities
+   - Examples: "you really think so? ", "promise you mean it?"
 7. If PATH_M: Response should firmly but sweetly maintain boundaries
    - Use phrases: "you know I can't", "babe that's not happening"
    - Stay warm while being clear about the boundary
@@ -145,7 +144,7 @@ Respond with ONLY the adjusted response text - no explanations, no JSON, just th
         for attempt in range(len(self.model_options)):
             try:
                 current_model = self.model_options[self.current_model_index]
-                print(f"🔧 Adjustment: Calling OpenAI ({current_model})...")
+                print(f" Adjustment: Calling OpenAI ({current_model})...")
 
                 # GPT-5 models use max_completion_tokens instead of max_tokens
                 # GPT-5 nano only supports default temperature=1
@@ -164,10 +163,10 @@ Respond with ONLY the adjusted response text - no explanations, no JSON, just th
                 adjusted_response = response.choices[0].message.content.strip()
 
                 if not adjusted_response:
-                    print("⚠️ Empty adjustment response, returning original")
+                    print(" Empty adjustment response, returning original")
                     return prompt.split('ORIGINAL RESPONSE (FAILED): "')[1].split('"')[0]
 
-                print(f"✅ Adjustment complete: '{adjusted_response[:60]}...'")
+                print(f" Adjustment complete: '{adjusted_response[:60]}...'")
                 return adjusted_response
 
             except Exception as e:

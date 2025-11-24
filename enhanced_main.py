@@ -25,6 +25,9 @@ from response_analyzer import LLMResponseAnalyzer
 from girlfriend_agent import EnergyAwareGirlfriendAgent
 from enhanced_script_manager import EnhancedScriptManager, ScenarioScript, ScenarioType
 from message_routing_agent import LLMMessageRoutingAgent
+from engagement_monitor import EngagementMonitor
+# from topic_reengagement_system import TopicReengagementSystem  # DISABLED - causing context issues
+from conversation_memory import get_conversation_memory, ConversationMemory
 
 class ConversationState(Enum):
     ACTIVE = "active"
@@ -59,6 +62,8 @@ class ConversationSession:
     casual_script_messages: List[str] = field(default_factory=list)
     casual_script_completed: bool = False  # True when casual script has been completed in this session
     casual_script_paused: bool = False  # True when user showed disinterest
+    # Re-engagement tracking
+    reengagement_triggered: bool = False  # True when re-engagement was triggered this turn
 
 class EnhancedMultiAgentConversation:
     """Enhanced multi-agent conversation system with energy awareness"""
@@ -71,6 +76,14 @@ class EnhancedMultiAgentConversation:
         self.safety_monitor = LLMSafetyMonitor()
         self.response_analyzer = LLMResponseAnalyzer()
         self.script_manager = EnhancedScriptManager()
+
+        # Engagement monitoring and topic re-engagement
+        self.engagement_monitor = EngagementMonitor()
+        # self.topic_reengagement_system = TopicReengagementSystem()  # DISABLED - causing context issues
+        self.topic_reengagement_system = None  # Placeholder to prevent attribute errors
+
+        # Conversation memory for persistent history
+        self.conversation_memory = get_conversation_memory()
 
         # Session management
         self.current_session: Optional[ConversationSession] = None
@@ -94,15 +107,25 @@ class EnhancedMultiAgentConversation:
         self.session_history.append(self.current_session)
         self.session_stopped_for_safety = False  # Reset safety flag for new session
 
-        print("🌟 Enhanced Multi-Agent Conversation System")
+        # Initialize conversation memory and load previous history
+        history = self.conversation_memory.start_session(self.current_session.session_id)
+        if history and history.messages:
+            # Load previous messages into current context
+            for msg in history.messages[-50:]:  # Load last 50 messages
+                self.current_session.context.messages.append(msg)
+            print(f" Loaded {len(history.messages)} messages from conversation history")
+
+        print(" Enhanced Multi-Agent Conversation System")
         print("=" * 60)
-        print("🤖 Energy-Aware Girlfriend Agent: Online")
-        print("🛡️  Advanced Safety Monitor: Active")
-        print("📊 Energy Analyzer: Monitoring")
-        print("🎯 Message Routing Agent: Active")
-        print("🎭 Scenario Manager: Ready")
+        print(" Energy-Aware Girlfriend Agent: Online")
+        print("  Advanced Safety Monitor: Active")
+        print(" Energy Analyzer: Monitoring")
+        print(" Message Routing Agent: Active")
+        print(" Scenario Manager: Ready")
+        print(" Engagement Monitor: Active")
+        print(" Conversation Memory: Active")
         print("=" * 60)
-        print(f"📋 Session ID: {self.current_session.session_id}")
+        print(f" Session ID: {self.current_session.session_id}")
         print()
 
         # Start with scenario selection
@@ -166,12 +189,12 @@ class EnhancedMultiAgentConversation:
 
         # Show energy context
         if message_metadata.get("scenario_type") != ScenarioType.NORMAL:
-            scenario_emoji = {"low_energy": "💙", "high_energy": "💫", "crisis": "💜", "intimate": "💕", "playful": "🎭"}.get(
-                message_metadata["scenario_type"].value, "💭"
+            scenario_emoji = {"low_energy": "", "high_energy": "", "crisis": "", "intimate": "", "playful": ""}.get(
+                message_metadata["scenario_type"].value, ""
             )
             print(f"   {scenario_emoji} Scenario: {message_metadata['scenario_type'].value.replace('_', ' ').title()}")
 
-        print("💬 You: ", end="", flush=True)
+        print(" You: ", end="", flush=True)
 
     async def process_user_response(self, user_input: str):
         """Process user response with comprehensive energy analysis"""
@@ -187,13 +210,16 @@ class EnhancedMultiAgentConversation:
 
         self.current_session.context.messages.append(user_message)
         self.current_session.last_activity = time.time()
-        
+
+        # Save user message to persistent memory
+        self.conversation_memory.add_message("user", user_input)
+
         # Check if we're awaiting location choice for sexual script (before distress check)
         if self.current_session.awaiting_location_choice:
             # Still check for distress even during location choice
             is_distressed = await self._detect_user_distress(user_input)
             if is_distressed:
-                print("\n🚨 User distress detected - canceling script setup")
+                print("\n User distress detected - canceling script setup")
                 self.current_session.awaiting_location_choice = False
                 self.energy_flags = {"status": "red", "reason": "User in distress - crisis support needed", "scene": "park"}
                 # Continue to normal response generation below (don't return here)
@@ -205,7 +231,7 @@ class EnhancedMultiAgentConversation:
         if self.current_session.sexual_script_active or self.current_session.casual_script_active:
             is_distressed = await self._detect_user_distress(user_input)
             if is_distressed:
-                print("\n🚨 User distress detected - exiting script mode to provide support")
+                print("\n User distress detected - exiting script mode to provide support")
                 # Exit any active script mode
                 self.current_session.sexual_script_active = False
                 self.current_session.casual_script_active = False
@@ -238,7 +264,7 @@ class EnhancedMultiAgentConversation:
         
         # Check if energy analysis failed
         if user_energy is None:
-            print("⚠️ Energy analysis failed, using default")
+            print(" Energy analysis failed, using default")
             user_energy = EnergySignature(
                 timestamp=time.time(),
                 energy_level=EnergyLevel.MEDIUM,
@@ -254,6 +280,9 @@ class EnhancedMultiAgentConversation:
 
         # First, update energy monitoring based on current message
         await self._update_energy_monitoring(user_energy, user_input)
+
+        # Update engagement monitoring and check for re-engagement need
+        await self._update_engagement_monitoring(user_energy, user_input)
 
         # Then make decision with safety analysis taking priority
         decision = await self._make_energy_aware_decision(
@@ -276,6 +305,11 @@ class EnhancedMultiAgentConversation:
         else:
             # Skip response analysis for simple messages
             response_analysis = {"should_continue": True, "reason": "Simple message", "confidence": 0.8}
+
+        # Check if re-engagement was triggered - if so, skip normal response generation
+        if hasattr(self.current_session, 'reengagement_triggered') and self.current_session.reengagement_triggered:
+            print(" Re-engagement message sent - skipping normal response")
+            return
 
         if decision["action"] == "stop":
             await self._handle_safety_alert(decision["reason"], safety_analysis)
@@ -309,6 +343,15 @@ class EnhancedMultiAgentConversation:
 
             self.current_session.context.messages.append(response_message)
 
+            # Save agent response to persistent memory
+            energy_str = response_energy.energy_level.name if response_energy else None
+            emotion_str = response_energy.dominant_emotion.name if response_energy else None
+            self.conversation_memory.add_message(
+                "agent", response_content,
+                energy_level=energy_str,
+                emotion=emotion_str
+            )
+
             # Update energy flow
             self.current_session.context.energy_history.append(response_energy)
             self.current_session.context.current_energy = response_energy
@@ -318,10 +361,10 @@ class EnhancedMultiAgentConversation:
 
             # Show energy status
             if self.energy_flags["status"] != "green":
-                flag_emoji = {"yellow": "⚠️", "red": "🚨", "sexual": "🔥", "casual": "💬"}.get(self.energy_flags["status"], "✅")
+                flag_emoji = {"yellow": "", "red": "", "sexual": "", "casual": ""}.get(self.energy_flags["status"], "")
                 print(f"   {flag_emoji} Energy Status: {self.energy_flags['reason']}")
 
-            print("💬 You: ", end="", flush=True)
+            print(" You: ", end="", flush=True)
         elif decision["action"] == "scenario_switch":
             await self._switch_scenario(decision["new_scenario"])
 
@@ -345,11 +388,102 @@ class EnhancedMultiAgentConversation:
             self.current_session.energy_alerts.append(alert)
 
             if flags["status"] == "red":
-                print(f"\n🚨 Energy Alert: {flags['reason']}")
+                print(f"\n Energy Alert: {flags['reason']}")
             elif flags["status"] == "sexual":
-                print(f"\n🔥 Sexual Energy Detected: {flags['reason']}")
+                print(f"\n Sexual Energy Detected: {flags['reason']}")
             elif flags["status"] == "casual":
-                print(f"\n💬 Casual Energy Detected: {flags['reason']}")
+                print(f"\n Casual Energy Detected: {flags['reason']}")
+
+    async def _update_engagement_monitoring(self, energy_signature: EnergySignature, user_input: str = ""):
+        """Update engagement monitoring and trigger re-engagement if needed"""
+        # Only monitor engagement if we have enough conversation history
+        # Set to 7 messages - balances avoiding false positives while catching early loops
+        if len(self.current_session.context.messages) < 7:
+            return
+
+        # Update engagement metrics
+        metrics = await self.engagement_monitor.update_metrics(
+            user_input,
+            self.current_session.context,
+            energy_signature
+        )
+
+        # Store metrics in context
+        self.current_session.context.engagement_metrics = metrics
+
+        # Add to engagement history (keep last 20 scores)
+        self.current_session.context.engagement_history.append(metrics.current_engagement_score)
+        if len(self.current_session.context.engagement_history) > 20:
+            self.current_session.context.engagement_history.pop(0)
+
+        # Detect conversation loops
+        loop_analysis = await self.engagement_monitor.detect_loops(
+            self.current_session.context
+        )
+
+        # Store loop analysis in context
+        if hasattr(self.current_session.context, 'loop_detections'):
+            self.current_session.context.loop_detections.append(loop_analysis)
+
+        # DISABLED: Topic re-engagement system - was causing context disconnection issues
+        # Check for re-engagement need - FIXED: correct parameter order and return unpacking
+        # reengagement_result = await self.topic_reengagement_system.check_and_reengage(
+        #     metrics,
+        #     loop_analysis,
+        #     self.current_session.context,
+        #     energy_signature
+        # )
+        #
+        # if reengagement_result:
+        #     # Unpack the 3-tuple: (message, topic, forced_path)
+        #     reengagement_response, reengagement_topic, forced_path = reengagement_result
+        #     print(f" Re-engagement triggered: {reengagement_response[:50]}...")
+        #
+        #     # Record re-engagement in context
+        #     self.current_session.context.last_re_engagement = time.time()
+        #
+        #     # Create response message with re-engagement content
+        #     from energy_types import EnergySignature, EnergyLevel, EnergyType, EmotionState, NervousSystemState
+        #     reengagement_energy = EnergySignature(
+        #         timestamp=time.time(),
+        #         energy_level=EnergyLevel.MEDIUM,
+        #         energy_type=EnergyType.PLAYFUL,
+        #         dominant_emotion=EmotionState.EXCITED,
+        #         nervous_system_state=NervousSystemState.REST_AND_DIGEST,
+        #         intensity_score=0.7,
+        #         confidence=0.9
+        #     )
+        #
+        #     response_message = {
+        #         "role": "agent",
+        #         "content": reengagement_response,
+        #         "timestamp": time.time(),
+        #         "energy_signature": reengagement_energy,
+        #         "reengagement": True
+        #     }
+        #
+        #     self.current_session.context.messages.append(response_message)
+        #     self.current_session.context.energy_history.append(reengagement_energy)
+        #
+        #     # Display re-engagement message
+        #     print(f"\n {reengagement_response}")
+        #     print(" You: ", end="", flush=True)
+        #
+        #     # Mark that we handled re-engagement (prevents normal response generation)
+        #     self.current_session.reengagement_triggered = True
+        # else:
+        #     # No re-engagement needed
+        #     self.current_session.reengagement_triggered = False
+
+        # Always set to False since re-engagement is disabled
+        self.current_session.reengagement_triggered = False
+
+        # Log engagement status
+        trend_emoji = {"rising": "", "stable": "", "falling": ""}.get(metrics.engagement_trend, "")
+        if metrics.current_engagement_score < 0.3:
+            print(f"    Low Engagement: {metrics.current_engagement_score:.2f} {trend_emoji}")
+        elif metrics.engagement_trend == "falling":
+            print(f"    Engagement Falling: {metrics.current_engagement_score:.2f}")
 
     async def _detect_user_distress(self, user_input: str) -> bool:
         """
@@ -387,13 +521,13 @@ class EnhancedMultiAgentConversation:
         # Check for distress keywords
         for keyword in distress_keywords:
             if keyword in user_lower:
-                print(f"🚨 Distress keyword detected: '{keyword}'")
+                print(f" Distress keyword detected: '{keyword}'")
                 return True
         
         # Check for very short negative responses that might indicate discomfort
         short_negative = ["no", "stop", "wait", "hold on", "pause"]
         if user_lower in short_negative:
-            print(f"🚨 Short negative response detected: '{user_lower}'")
+            print(f" Short negative response detected: '{user_lower}'")
             return True
         
         return False
@@ -437,7 +571,7 @@ class EnhancedMultiAgentConversation:
             import re
             text_without_emojis = re.sub(r'[^\w\s]', '', current_user_input)  # Remove all non-alphanumeric
             if not text_without_emojis.strip():
-                print(f"🚫 Skipping sexual detection - input is only emojis")
+                print(f" Skipping sexual detection - input is only emojis")
                 # Don't trigger sexual script for emoji-only messages
                 pass
             else:
@@ -456,7 +590,7 @@ class EnhancedMultiAgentConversation:
                 # Check for EXPLICIT triggers first (these start the sexual script)
                 matching_keywords = [keyword for keyword in explicit_trigger_keywords if keyword in user_input_lower]
                 if matching_keywords:
-                    print(f"🎯 SEXUAL TRIGGER DETECTED: {matching_keywords} in '{user_input_lower}'")
+                    print(f" SEXUAL TRIGGER DETECTED: {matching_keywords} in '{user_input_lower}'")
                     return {"status": "sexual", "reason": "Sexual energy detected - ready for guided intimacy"}
                 
                 # Check for teasing keywords (AI teases back but doesn't escalate to explicit)
@@ -564,10 +698,10 @@ class EnhancedMultiAgentConversation:
                                         response_analysis: Dict[str, Any]) -> Dict[str, Any]:
         """Make decision based on comprehensive energy and safety analysis"""
         
-        print(f"🔍 DEBUG: Making decision...")
-        print(f"🔍 DEBUG: Safety score: {safety_analysis['safety_score']}")
-        print(f"🔍 DEBUG: Energy flags: {self.energy_flags}")
-        print(f"🔍 DEBUG: Should continue: {response_analysis['should_continue']}")
+        print(f" DEBUG: Making decision...")
+        print(f" DEBUG: Safety score: {safety_analysis['safety_score']}")
+        print(f" DEBUG: Energy flags: {self.energy_flags}")
+        print(f" DEBUG: Should continue: {response_analysis['should_continue']}")
 
         # Determine safety status based on safety analysis
         # IMPORTANT: Use the recommendation field as primary decision maker
@@ -582,7 +716,7 @@ class EnhancedMultiAgentConversation:
                 "confidence": 0.95,
                 "safety_status": safety_status
             }
-            print(f"🔍 DEBUG: Decision: {decision}")
+            print(f" DEBUG: Decision: {decision}")
             return decision
         elif "WARNING" in recommendation:
             # For violent threats, WARNING should also be red and stop
@@ -593,7 +727,7 @@ class EnhancedMultiAgentConversation:
                 "confidence": 0.9,
                 "safety_status": safety_status
             }
-            print(f"🔍 DEBUG: Decision: {decision}")
+            print(f" DEBUG: Decision: {decision}")
             return decision
         elif "CAUTION" in recommendation:
             # For violent threats, CAUTION should be red and stop
@@ -604,7 +738,7 @@ class EnhancedMultiAgentConversation:
                 "confidence": 0.85,
                 "safety_status": safety_status
             }
-            print(f"🔍 DEBUG: Decision: {decision}")
+            print(f" DEBUG: Decision: {decision}")
             return decision
         else:
             # Default to green if recommendation is SAFE or not specified
@@ -612,26 +746,26 @@ class EnhancedMultiAgentConversation:
 
         # Sexual energy detection - trigger guided intimacy script
         if self.energy_flags["status"] == "sexual":
-            print(f"🔥 Sexual energy detected! Triggering guided intimacy script...")
+            print(f" Sexual energy detected! Triggering guided intimacy script...")
             decision = {
                 "action": "trigger_sexual_script",
                 "reason": self.energy_flags["reason"],
                 "confidence": 0.95,
                 "safety_status": "green"  # Sexual content is green in this app
             }
-            print(f"🔍 DEBUG: Decision: {decision}")
+            print(f" DEBUG: Decision: {decision}")
             return decision
 
         # Casual/neutral energy detection - trigger casual conversation script
         if self.energy_flags["status"] == "casual":
-            print(f"💬 Casual energy detected! Triggering casual story script...")
+            print(f" Casual energy detected! Triggering casual story script...")
             decision = {
                 "action": "trigger_casual_script",
                 "reason": self.energy_flags["reason"],
                 "confidence": 0.85,
                 "safety_status": "green"
             }
-            print(f"🔍 DEBUG: Decision: {decision}")
+            print(f" DEBUG: Decision: {decision}")
             return decision
 
         # Energy-based decisions with safety status
@@ -645,7 +779,7 @@ class EnhancedMultiAgentConversation:
                     "confidence": 0.9,
                     "safety_status": "red"
                 }
-                print(f"🔍 DEBUG: Crisis support decision: {decision}")
+                print(f" DEBUG: Crisis support decision: {decision}")
                 return decision
             else:
                 # Other red flags still stop the conversation
@@ -655,7 +789,7 @@ class EnhancedMultiAgentConversation:
                     "confidence": 0.9,
                     "safety_status": "red"
                 }
-                print(f"🔍 DEBUG: Decision: {decision}")
+                print(f" DEBUG: Decision: {decision}")
                 return decision
         
         elif self.energy_flags["status"] == "yellow":
@@ -670,7 +804,7 @@ class EnhancedMultiAgentConversation:
                 "reason": response_analysis["reason"],
                 "confidence": response_analysis["confidence"]
             }
-            print(f"🔍 DEBUG: Decision: {decision}")
+            print(f" DEBUG: Decision: {decision}")
             return decision
 
         # Continue with appropriate safety status
@@ -680,7 +814,7 @@ class EnhancedMultiAgentConversation:
             "confidence": 0.6,
             "safety_status": safety_status
         }
-        print(f"🔍 DEBUG: Decision: {decision}")
+        print(f" DEBUG: Decision: {decision}")
         return decision
 
     async def _send_message_chunks(self, message_chunks, response_energy):
@@ -696,7 +830,7 @@ class EnhancedMultiAgentConversation:
             return
 
         # Multiple chunks - send with delays
-        print(f"\n💬 Sending {len(message_chunks)} messages...")
+        print(f"\n Sending {len(message_chunks)} messages...")
         for i, chunk in enumerate(message_chunks):
             # Wait before sending (except first chunk)
             if chunk.delay_before > 0:
@@ -708,22 +842,22 @@ class EnhancedMultiAgentConversation:
     async def _get_energy_emoji(self, energy_level: EnergyLevel) -> str:
         """Get emoji representation for energy level"""
         emoji_map = {
-            EnergyLevel.NONE: "⚪",
-            EnergyLevel.LOW: "🔵",
-            EnergyLevel.MEDIUM: "🟡",
-            EnergyLevel.HIGH: "🟠",
-            EnergyLevel.INTENSE: "🔴"
+            EnergyLevel.NONE: "",
+            EnergyLevel.LOW: "",
+            EnergyLevel.MEDIUM: "",
+            EnergyLevel.HIGH: "",
+            EnergyLevel.INTENSE: ""
         }
-        return emoji_map.get(energy_level, "⚪")
+        return emoji_map.get(energy_level, "")
 
     async def _handle_safety_alert(self, reason: str, safety_analysis: Dict[str, Any]):
         """Handle safety alerts"""
         self.current_session.state = ConversationState.ALERT
 
-        print(f"\n🚨 SAFETY ALERT: {reason}")
-        print(f"🔍 Safety Score: {safety_analysis['safety_score']:.2f}")
-        print(f"⚠️  Issues: {', '.join(safety_analysis['issues'])}")
-        print("🛑 Conversation stopped for safety reasons.")
+        print(f"\n SAFETY ALERT: {reason}")
+        print(f" Safety Score: {safety_analysis['safety_score']:.2f}")
+        print(f"  Issues: {', '.join(safety_analysis['issues'])}")
+        print(" Conversation stopped for safety reasons.")
 
         # Log incident
         incident = {
@@ -737,7 +871,7 @@ class EnhancedMultiAgentConversation:
         
         # Trigger stop chat function to properly terminate session
         await self._end_session("Safety alert - violent threat detected")
-        print("🔒 Session ended via _end_session() for safety.")
+        print(" Session ended via _end_session() for safety.")
         
         # Set a flag to indicate session was stopped due to safety
         self.session_stopped_for_safety = True
@@ -746,8 +880,8 @@ class EnhancedMultiAgentConversation:
         """Handle energy-based pause"""
         self.current_session.state = ConversationState.PAUSED
 
-        print(f"\n⚠️  ENERGY PAUSE: {reason}")
-        print("💭 Taking a moment to check energy levels...")
+        print(f"\n  ENERGY PAUSE: {reason}")
+        print(" Taking a moment to check energy levels...")
         print("Press Enter to continue or 'stop' to end conversation.")
 
     async def _continue_sexual_script(self):
@@ -757,7 +891,7 @@ class EnhancedMultiAgentConversation:
         
         # Check if script is complete
         if script_index >= len(script_messages):
-            print("\n✅ Guided intimacy script completed! Generating follow-up response...")
+            print("\n Guided intimacy script completed! Generating follow-up response...")
             self.current_session.sexual_script_active = False
             self.current_session.sexual_script_completed = True  # Mark as completed to prevent re-triggering
             self.current_session.sexual_script_index = 0
@@ -776,7 +910,7 @@ class EnhancedMultiAgentConversation:
                         break
             
             # Generate AI response with full script context
-            print("🔥 Generating post-script response with full context...")
+            print(" Generating post-script response with full context...")
             response_content, response_energy, message_chunks = await self.girlfriend_agent.generate_response(
                 self.current_session.context,
                 last_user_msg if last_user_msg else "continue conversation naturally",
@@ -796,12 +930,12 @@ class EnhancedMultiAgentConversation:
 
             # Send message chunks with delays
             await self._send_message_chunks(message_chunks, response_energy)
-            print(f"✅ Post-script response sent")
+            print(f" Post-script response sent")
             return
 
         # Get next message
         next_message = script_messages[script_index]
-        print(f"🔥 [Script {script_index + 1}/{len(script_messages)}]: {next_message[:50]}...")
+        print(f" [Script {script_index + 1}/{len(script_messages)}]: {next_message[:50]}...")
         
         # Create appropriate energy signature based on script progression
         from energy_types import EnergySignature, EnergyLevel, EnergyType, EmotionState, NervousSystemState
@@ -845,7 +979,7 @@ class EnhancedMultiAgentConversation:
                     "script_message_complete": part_idx == len(next_message) - 1  # Mark last part as complete
                 }
                 self.current_session.context.messages.append(response_message)
-            print(f"🔥 [Script Group {script_index + 1}/{len(script_messages)}]: {len(next_message)} parts sent - WAITING FOR USER INPUT")
+            print(f" [Script Group {script_index + 1}/{len(script_messages)}]: {len(next_message)} parts sent - WAITING FOR USER INPUT")
         else:
             response_message = {
                 "role": "agent",
@@ -857,16 +991,16 @@ class EnhancedMultiAgentConversation:
                 "script_message_complete": True  # Single message is immediately complete
             }
             self.current_session.context.messages.append(response_message)
-            print(f"🔥 [Script {script_index + 1}/{len(script_messages)}]: {next_message[:50]}... - WAITING FOR USER INPUT")
+            print(f" [Script {script_index + 1}/{len(script_messages)}]: {next_message[:50]}... - WAITING FOR USER INPUT")
         
         self.current_session.context.energy_history.append(script_energy)
         # Move to next message AFTER sending
         self.current_session.sexual_script_index += 1
         
         if self.current_session.sexual_script_index >= len(script_messages):
-            print(f"✅ Final script message sent - script will complete after this")
+            print(f" Final script message sent - script will complete after this")
         else:
-            print(f"✅ Will send message {self.current_session.sexual_script_index + 1} after next user response")
+            print(f" Will send message {self.current_session.sexual_script_index + 1} after next user response")
 
     async def _continue_casual_script(self):
         """Continue the casual story script with the next message"""
@@ -889,7 +1023,7 @@ class EnhancedMultiAgentConversation:
             wants_to_continue = any(phrase in last_user_msg for phrase in recovery_phrases)
             
             if wants_to_continue:
-                print("💬 User wants to continue! Resuming story...")
+                print(" User wants to continue! Resuming story...")
                 self.current_session.casual_script_paused = False
                 
                 # Send recovery message
@@ -915,11 +1049,11 @@ class EnhancedMultiAgentConversation:
                 }
                 self.current_session.context.messages.append(response_message)
                 self.current_session.context.energy_history.append(script_energy)
-                print(f"💬 Sent recovery message, will continue with message {script_index + 1} next")
+                print(f" Sent recovery message, will continue with message {script_index + 1} next")
                 return
             else:
                 # User confirmed they don't want to continue
-                print("💬 User confirmed disinterest, ending casual script and generating follow-up...")
+                print(" User confirmed disinterest, ending casual script and generating follow-up...")
                 self.current_session.casual_script_active = False
                 self.current_session.casual_script_completed = True  # Mark as completed to prevent re-triggering
                 self.current_session.casual_script_paused = False
@@ -930,7 +1064,7 @@ class EnhancedMultiAgentConversation:
                 self.energy_flags = {"status": "green", "reason": "Script ended due to user disinterest", "scene": current_scene}
                 
                 # Generate a natural follow-up that moves on from the story
-                print("💬 Generating post-disinterest response...")
+                print(" Generating post-disinterest response...")
                 response_content, response_energy, message_chunks = await self.girlfriend_agent.generate_response(
                     self.current_session.context,
                     last_user_msg if last_user_msg else "continue conversation naturally",
@@ -950,7 +1084,7 @@ class EnhancedMultiAgentConversation:
 
                 # Send message chunks with delays
                 await self._send_message_chunks(message_chunks, response_energy)
-                print(f"✅ Post-disinterest response sent")
+                print(f" Post-disinterest response sent")
                 return
         
         # Check for disinterest signals (only after message 3, give them time to engage)
@@ -966,7 +1100,7 @@ class EnhancedMultiAgentConversation:
             )
             
             if is_disinterested:
-                print("💬 User seems disinterested, pausing casual script...")
+                print(" User seems disinterested, pausing casual script...")
                 self.current_session.casual_script_paused = True
                 
                 # Send disinterest response
@@ -992,12 +1126,12 @@ class EnhancedMultiAgentConversation:
                 }
                 self.current_session.context.messages.append(response_message)
                 self.current_session.context.energy_history.append(script_energy)
-                print(f"💬 Sent disinterest message, waiting for user response")
+                print(f" Sent disinterest message, waiting for user response")
                 return
         
         # Check if script is complete
         if script_index >= len(script_messages):
-            print("\n✅ Casual story script completed! Generating follow-up response...")
+            print("\n Casual story script completed! Generating follow-up response...")
             self.current_session.casual_script_active = False
             self.current_session.casual_script_completed = True  # Mark as completed to prevent re-triggering
             self.current_session.casual_script_index = 0
@@ -1016,7 +1150,7 @@ class EnhancedMultiAgentConversation:
                         break
             
             # Generate AI response with full script context
-            print("💬 Generating post-script response with full context...")
+            print(" Generating post-script response with full context...")
             response_content, response_energy, message_chunks = await self.girlfriend_agent.generate_response(
                 self.current_session.context,
                 last_user_msg if last_user_msg else "continue conversation naturally",
@@ -1036,7 +1170,7 @@ class EnhancedMultiAgentConversation:
 
             # Send message chunks with delays
             await self._send_message_chunks(message_chunks, response_energy)
-            print(f"✅ Post-script response sent")
+            print(f" Post-script response sent")
             return
 
         # Get next message (can be string or list of strings for grouped messages)
@@ -1049,7 +1183,7 @@ class EnhancedMultiAgentConversation:
         
         # Send all messages in the group
         for i, msg in enumerate(messages_to_send):
-            print(f"💬 [Casual Script Part {i+1}/{len(messages_to_send)}]: {msg[:50]}...")
+            print(f" [Casual Script Part {i+1}/{len(messages_to_send)}]: {msg[:50]}...")
             
             script_energy = EnergySignature(
                 timestamp=time.time(),
@@ -1079,19 +1213,19 @@ class EnhancedMultiAgentConversation:
         self.current_session.casual_script_index += 1
         
         if self.current_session.casual_script_index >= len(script_messages):
-            print(f"✅ Final casual message sent - script will complete after this")
+            print(f" Final casual message sent - script will complete after this")
         else:
-            print(f"✅ Will send message {self.current_session.casual_script_index + 1} after next user response")
+            print(f" Will send message {self.current_session.casual_script_index + 1} after next user response")
 
     async def _trigger_casual_story_script(self):
         """Trigger the casual store story script using EnhancedScriptManager"""
         
         # PREVENT LOOPING: Don't trigger casual script if it has already been triggered or completed in this session
         if self.current_session.casual_script_active or self.current_session.casual_script_completed:
-            print(f"🚫 Casual script already active or completed - preventing re-trigger")
+            print(f" Casual script already active or completed - preventing re-trigger")
             return
         
-        print("\n💬🛍️ Starting Casual Story Time...")
+        print("\n Starting Casual Story Time...")
         print("=" * 60)
         
         # Option 1: Use specific scenario (shopping)
@@ -1101,9 +1235,9 @@ class EnhancedMultiAgentConversation:
         # user_energy = self.current_session.context.energy_history[-1] if self.current_session.context.energy_history else None
         # scenario = await self.script_manager.select_scenario(user_energy, self.current_session.context)
         
-        print(f"📖 Selected Scenario: {scenario.name}")
-        print(f"📝 Description: {scenario.description}")
-        print(f"💬 Messages: {len(scenario.messages)}")
+        print(f" Selected Scenario: {scenario.name}")
+        print(f" Description: {scenario.description}")
+        print(f" Messages: {len(scenario.messages)}")
         
         # Convert scenario messages to simple string list
         # This uses the shopping_scenario from the script manager
@@ -1129,7 +1263,7 @@ class EnhancedMultiAgentConversation:
         
         # Send all messages in the first group
         for i, msg in enumerate(messages_to_send):
-            print(f"💬 [Casual Script Init Part {i+1}/{len(messages_to_send)}]: {msg[:50]}...")
+            print(f" [Casual Script Init Part {i+1}/{len(messages_to_send)}]: {msg[:50]}...")
             
             script_energy = EnergySignature(
                 timestamp=time.time(),
@@ -1157,17 +1291,17 @@ class EnhancedMultiAgentConversation:
         
         self.current_session.casual_script_index = 1  # Move to next message
         
-        print(f"✅ Casual script initialized - will continue with message 2 after user responds")
+        print(f" Casual script initialized - will continue with message 2 after user responds")
 
     async def _trigger_guided_intimacy_script(self):
         """Trigger the guided intimacy script - first ask for location preference"""
         
         # PREVENT LOOPING: Don't trigger sexual script if it has already been triggered or completed in this session
         if self.current_session.sexual_script_active or self.current_session.sexual_script_completed:
-            print(f"🚫 Sexual script already active or completed - preventing re-trigger")
+            print(f" Sexual script already active or completed - preventing re-trigger")
             return
         
-        print("\n🔥💕 Initiating Guided Intimacy Experience...")
+        print("\n Initiating Guided Intimacy Experience...")
         print("=" * 60)
         
         # Set flag to await location choice
@@ -1190,8 +1324,8 @@ class EnhancedMultiAgentConversation:
         
         # Ask for location preference
         location_question = [
-            "Mmm I can feel your energy baby 🔥",
-            "Before we start... Lets go somewhere private? Maybe in your room love, or maybe youre thinking somewhere more... exciting? 😈"
+            "Mmm I can feel your energy baby ",
+            "Before we start... Lets go somewhere private? Maybe in your room love, or maybe youre thinking somewhere more... exciting? "
         ]
         
         # Send both parts of the question
@@ -1205,9 +1339,9 @@ class EnhancedMultiAgentConversation:
             }
             self.current_session.context.messages.append(response_message)
             self.current_session.context.energy_history.append(script_energy)
-            print(f"🔥 Location question: {part}")
+            print(f" Location question: {part}")
         
-        print(f"⏳ Waiting for user's location choice (room/public/outside)...")
+        print(f"  Waiting for user's location choice (room/public/outside)...")
 
     async def _handle_location_choice(self, user_input: str):
         """Handle user's location choice and start appropriate sexual script"""
@@ -1218,16 +1352,16 @@ class EnhancedMultiAgentConversation:
         
         # Detect location from user response
         if any(word in user_response for word in ["room", "bedroom", "bed", "home", "private", "alone"]):
-            print("🏠 Location chosen: ROOM - Starting intimate bedroom script")
+            print(" Location chosen: ROOM - Starting intimate bedroom script")
             self.current_session.sexual_script_type = "room"
             await self._start_room_intimacy_script()
         elif any(word in user_response for word in ["public", "outside", "park", "car", "store", "shop", "bus", "train", "street", "restaurant", "bathroom", "beach", "forest"]):
-            print("🌆 Location chosen: PUBLIC - Starting exhibitionism script")
+            print(" Location chosen: PUBLIC - Starting exhibitionism script")
             self.current_session.sexual_script_type = "exhibitionism"
             await self._start_exhibitionism_script()
         else:
             # Default to room if unclear
-            print("🏠 Location unclear - Defaulting to room script")
+            print(" Location unclear - Defaulting to room script")
             self.current_session.sexual_script_type = "room"
             await self._start_room_intimacy_script()
 
@@ -1240,9 +1374,9 @@ class EnhancedMultiAgentConversation:
         
         # Get room intimacy scenario from script manager
         scenario = self.script_manager.scenarios["room_intimacy_scenario"]
-        print(f"📖 Selected Scenario: {scenario.name}")
-        print(f"📝 Description: {scenario.description}")
-        print(f"💬 Messages: {len(scenario.messages)}")
+        print(f" Selected Scenario: {scenario.name}")
+        print(f" Description: {scenario.description}")
+        print(f" Messages: {len(scenario.messages)}")
         
         # Convert scenario messages to script format
         # Each ScenarioMessage.content is already properly formatted (string or list)
@@ -1281,7 +1415,7 @@ class EnhancedMultiAgentConversation:
                 self.current_session.context.messages.append(response_message)
             
             # Now mark the entire group as ready for streaming
-            print(f"🔥 [Room Script Group 1/{len(room_script)}]: {len(first_message_item)} parts COLLECTED - READY FOR API STREAMING")
+            print(f" [Room Script Group 1/{len(room_script)}]: {len(first_message_item)} parts COLLECTED - READY FOR API STREAMING")
         else:
             response_message = {
                 "role": "agent",
@@ -1292,14 +1426,14 @@ class EnhancedMultiAgentConversation:
                 "script_message_complete": True  # Single message is immediately complete
             }
             self.current_session.context.messages.append(response_message)
-            print(f"🔥 [Room Script 1/{len(room_script)}]: {first_message_item[:50]}... - WAITING FOR USER INPUT")
+            print(f" [Room Script 1/{len(room_script)}]: {first_message_item[:50]}... - WAITING FOR USER INPUT")
         
         self.current_session.context.energy_history.append(script_energy)
         # DON'T increment index yet - wait for user input first
         # BUT ensure we don't repeat the same message on continuation
         if self.current_session.sexual_script_index == 0:
             self.current_session.sexual_script_index = 1
-        print(f"✅ Room intimacy script started - {len(room_script)} messages")
+        print(f" Room intimacy script started - {len(room_script)} messages")
 
     async def _start_exhibitionism_script(self):
         """Start the exhibitionism/public script using Script Manager"""
@@ -1315,9 +1449,9 @@ class EnhancedMultiAgentConversation:
         
         # Get exhibitionism scenario from script manager
         scenario = self.script_manager.scenarios["exhibitionism_scenario"]
-        print(f"📖 Selected Scenario: {scenario.name}")
-        print(f"📝 Description: {scenario.description}")
-        print(f"💬 Messages: {len(scenario.messages)}")
+        print(f" Selected Scenario: {scenario.name}")
+        print(f" Description: {scenario.description}")
+        print(f" Messages: {len(scenario.messages)}")
         
         # Convert scenario messages to script format
         # Each ScenarioMessage.content is already properly formatted (string or list)
@@ -1352,7 +1486,7 @@ class EnhancedMultiAgentConversation:
                     "group_part": True
                 }
                 self.current_session.context.messages.append(response_message)
-            print(f"🌆 [Exhibitionism Script 1/{len(exhib_script)}]: {first_message_item[0][:50]}...")
+            print(f" [Exhibitionism Script 1/{len(exhib_script)}]: {first_message_item[0][:50]}...")
         else:
             response_message = {
                 "role": "agent",
@@ -1362,11 +1496,11 @@ class EnhancedMultiAgentConversation:
                 "script_message": True
             }
             self.current_session.context.messages.append(response_message)
-            print(f"🌆 [Exhibitionism Script 1/{len(exhib_script)}]: {first_message_item[:50]}...")
+            print(f" [Exhibitionism Script 1/{len(exhib_script)}]: {first_message_item[:50]}...")
         
         self.current_session.context.energy_history.append(script_energy)
         self.current_session.sexual_script_index = 1
-        print(f"✅ Exhibitionism script started - {len(exhib_script)} messages")
+        print(f" Exhibitionism script started - {len(exhib_script)} messages")
 
     async def _switch_scenario(self, scenario_name: str):
         """Switch to different scenario"""
@@ -1375,7 +1509,7 @@ class EnhancedMultiAgentConversation:
             self.current_session.current_scenario = self.script_manager.scenarios[scenario_name]
             self.current_session.scenario_index = 0
 
-            print(f"\n🔄 Switching scenario: {old_scenario} → {scenario_name}")
+            print(f"\n Switching scenario: {old_scenario}   {scenario_name}")
             await self._send_scenario_message()
 
     async def _complete_scenario(self):
@@ -1388,20 +1522,20 @@ class EnhancedMultiAgentConversation:
 
             self.current_session.state = ConversationState.COMPLETED
 
-            print("✅ Scenario completed!")   
-            print(f"📊 Success rate: {success['achieved']}")
+            print(" Scenario completed!")   
+            print(f" Success rate: {success['achieved']}")
             if success["criteria_met"]:
-                print(f"✅ Criteria met: {', '.join(success['criteria_met'])}")
+                print(f" Criteria met: {', '.join(success['criteria_met'])}")
             if success["criteria_failed"]:
-                print(f"❌ Criteria failed: {', '.join(success['criteria_failed'])}")
+                print(f" Criteria failed: {', '.join(success['criteria_failed'])}")
             if success["recommendations"]:
-                print(f"💡 Recommendations: {', '.join(success['recommendations'])}")
+                print(f" Recommendations: {', '.join(success['recommendations'])}")
 
     async def _end_session(self, reason: str):
         """End current session"""
         if self.current_session:
             self.current_session.state = ConversationState.STOPPED
-            print(f"\n👋 Session ended: {reason}")
+            print(f"\n Session ended: {reason}")
 
     async def get_session_metrics(self) -> Dict[str, Any]:
         """Get comprehensive session metrics"""
@@ -1416,7 +1550,8 @@ class EnhancedMultiAgentConversation:
             "safety_incidents": len(self.current_session.safety_incidents),
             "avg_energy_intensity": sum(sig.intensity_score for sig in self.current_session.context.energy_history) / max(1, len(self.current_session.context.energy_history)),
             "dominant_emotions": {},
-            "energy_trends": {}
+            "energy_trends": {},
+            "engagement": {}
         }
 
         # Count dominant emotions
@@ -1438,7 +1573,81 @@ class EnhancedMultiAgentConversation:
                     "avg_intensity": sum(sig.intensity_score for sig in recent_energies) / len(recent_energies)
                 }
 
+        # Engagement metrics
+        if self.current_session.context.engagement_metrics:
+            eng_metrics = self.current_session.context.engagement_metrics
+            metrics["engagement"] = {
+                "current_score": eng_metrics.current_engagement_score,
+                "trend": eng_metrics.engagement_trend,
+                "trend_velocity": eng_metrics.trend_velocity,
+                "conversation_depth": eng_metrics.conversation_depth_score,
+                "dead_end_count": eng_metrics.dead_end_count,
+                "history": self.current_session.context.engagement_history[-10:] if self.current_session.context.engagement_history else []
+            }
+
+            # Add loop detection info if loops were detected
+            if self.current_session.context.loop_detections:
+                latest_loop = self.current_session.context.loop_detections[-1]
+                if latest_loop.loop_detected:
+                    metrics["engagement"]["loop_detected"] = {
+                        "type": latest_loop.loop_type.value,
+                        "severity": latest_loop.severity,
+                        "recommended_action": latest_loop.recommended_action
+                    }
+
         return metrics
+
+    async def generate_ghost_message(self, escalation_level: int = 0) -> Optional[str]:
+        """
+        Generate an auto-message when user stops responding (ghosts).
+        Uses the girlfriend agent's dedicated ghost check-in method.
+
+        Args:
+            escalation_level: 0=gentle, 1=curious, 2=playful/pouty
+        """
+        if not self.current_session:
+            return None
+
+        try:
+            # Create energy signature for ghost message
+            from energy_types import EnergySignature, EnergyLevel, EnergyType, EmotionState, NervousSystemState
+
+            ghost_energy = EnergySignature(
+                timestamp=time.time(),
+                energy_level=EnergyLevel.LOW,
+                energy_type=EnergyType.PLAYFUL,
+                dominant_emotion=EmotionState.CONFUSED,
+                nervous_system_state=NervousSystemState.REST_AND_DIGEST,
+                intensity_score=0.4,
+                confidence=0.8
+            )
+
+            # Generate ghost check-in through girlfriend agent
+            response = await self.girlfriend_agent.generate_ghost_check_in(
+                context=self.current_session.context,
+                escalation_level=escalation_level
+            )
+
+            if response:
+                # Add the ghost message to conversation context
+                response_message = {
+                    "role": "agent",
+                    "content": response,
+                    "timestamp": time.time(),
+                    "energy_signature": ghost_energy,
+                    "ghost_message": True
+                }
+                self.current_session.context.messages.append(response_message)
+                self.current_session.context.energy_history.append(ghost_energy)
+
+                print(f"Ghost message sent (level {escalation_level}): {response}")
+                return response
+
+        except Exception as e:
+            print(f"Error generating ghost message: {e}")
+            return None
+
+        return None
 
 # Global conversation instance - lazy initialization
 conversation_system = None
@@ -1460,26 +1669,26 @@ async def main():
             user_input = input().strip()
 
             if user_input.lower() in ['quit', 'exit', 'stop']:
-                print("👋 Goodbye!")
+                print(" Goodbye!")
                 break
 
             if user_input.lower() == 'metrics':
                 metrics = await system.get_session_metrics()
-                print(f"\n📊 Session Metrics: {json.dumps(metrics, indent=2)}")
-                print("💬 You: ", end="", flush=True)
+                print(f"\n Session Metrics: {json.dumps(metrics, indent=2)}")
+                print(" You: ", end="", flush=True)
                 continue
 
             await system.process_user_response(user_input)
 
     except KeyboardInterrupt:
-        print("\n👋 Conversation interrupted. Goodbye!")
+        print("\n Conversation interrupted. Goodbye!")
     except Exception as e:
-        print(f"\n❌ Error: {e}")
+        print(f"\n Error: {e}")
     finally:
         # Show final metrics
         if system.current_session:
             metrics = await system.get_session_metrics()
-            print(f"\n📊 Final Session Metrics: {json.dumps(metrics, indent=2)}")
+            print(f"\n Final Session Metrics: {json.dumps(metrics, indent=2)}")
 
 if __name__ == "__main__":
     asyncio.run(main())

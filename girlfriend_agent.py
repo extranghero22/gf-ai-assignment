@@ -16,6 +16,7 @@ from hyunnie_persona import HyunniePersona
 from response_quality_agent import ResponseQualityAgent
 from response_adjustment_agent import ResponseAdjustmentAgent
 from message_splitter_agent import MessageSplitterAgent, MessageChunk
+from user_style_analyzer import get_user_style_analyzer, UserStyleAnalyzer
 
 # Load environment variables from .env file
 load_dotenv()
@@ -32,8 +33,8 @@ class EnergyAwareGirlfriendAgent:
         self.client = OpenAI(api_key=openai_api_key)
 
         # OpenAI model configuration with fallbacks
-        # Using gpt-4o-mini as primary - gpt-5-nano is too limited for complex conversational responses
-        self.model_options = ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo", "gpt-5-nano"]
+        # Using gpt-4o-mini as primary for high-quality conversational responses
+        self.model_options = ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"]
         self.current_model_index = 0
         self.model_name = self.model_options[0]
         # Generation config (gpt-4o-mini supports all parameters)
@@ -53,6 +54,9 @@ class EnergyAwareGirlfriendAgent:
         self.adjustment_agent = ResponseAdjustmentAgent()
         # Link adjustment agent to quality agent
         self.quality_agent.set_adjustment_agent(self.adjustment_agent)
+
+        # User style analyzer for mirroring user's typing patterns
+        self.user_style_analyzer = get_user_style_analyzer()
 
         self.personality_matrix = {
             "base_traits": {
@@ -107,12 +111,108 @@ class EnergyAwareGirlfriendAgent:
             }
         }
 
+    def get_user_style_info(self) -> dict:
+        """Get current user style profile for API/debugging"""
+        return self.user_style_analyzer.get_style_summary()
+
+    def reset_user_style(self) -> None:
+        """Reset user style analyzer (e.g., for new session)"""
+        self.user_style_analyzer.reset()
+
+    async def generate_ghost_check_in(self, context: ConversationContext, escalation_level: int = 0) -> str:
+        """
+        Generate a check-in message when user stops responding (ghosts).
+        This bypasses routing and uses a simpler, direct prompt.
+
+        Args:
+            context: Current conversation context
+            escalation_level: 0=gentle, 1=curious, 2=playful/pouty
+
+        Returns:
+            A short check-in message matching Hyunnie's personality
+        """
+        # Get recent conversation context for awareness
+        recent_messages = []
+        if context.messages:
+            recent = context.messages[-3:] if len(context.messages) >= 3 else context.messages
+            for msg in recent:
+                role = msg.get('role', 'unknown')
+                content = msg.get('content', '')[:100]
+                recent_messages.append(f"{role}: {content}")
+
+        context_summary = "\n".join(recent_messages) if recent_messages else "No recent messages"
+
+        # Different prompts based on escalation
+        if escalation_level == 0:
+            style_instruction = """Generate a SHORT, casual check-in (under 10 words).
+Be gentle and curious. Examples: "babe?", "hello?", "you there?", "hellooo?"
+Don't be dramatic yet, just a simple check-in."""
+        elif escalation_level == 1:
+            style_instruction = """Generate a slightly more curious check-in (under 15 words).
+Wonder where they went. Examples: "hellloooo??", "did you fall asleep on me?", "where'd you go"
+Be a bit more noticeable but still casual."""
+        else:
+            style_instruction = """Generate a playful/pouty check-in (under 20 words).
+Be dramatic about being ignored. Examples: "you're ghosting me rn", "fine ignore me then", "i see how it is"
+Be playfully hurt but not actually upset."""
+
+        prompt = f"""You are Hyunnie, a 20-year-old girlfriend. The user hasn't responded in a while.
+
+Recent conversation:
+{context_summary}
+
+{style_instruction}
+
+RULES:
+- Keep it SHORT and casual
+- Use lowercase, natural texting style
+- Can use 1-2 emojis max
+- Match Hyunnie's playful personality
+- Don't be too needy or desperate
+- Just one message, no multiple options
+
+Generate the check-in message:"""
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model_options[0],
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=30,
+                temperature=0.8
+            )
+
+            if response.choices and response.choices[0].message:
+                message = response.choices[0].message.content.strip()
+                # Clean up any quotes or extra formatting
+                message = message.strip('"\'')
+                print(f"Ghost check-in generated (level {escalation_level}): {message}")
+                return message
+
+        except Exception as e:
+            print(f"Error generating ghost check-in: {e}")
+
+        # Fallback messages if API fails
+        fallbacks = [
+            ["babe?", "hello?", "you there?"],
+            ["hellooo??", "did you fall asleep?", "where'd you go"],
+            ["you're ghosting me rn", "fine ignore me then", "i see how it is"]
+        ]
+        import random
+        level = min(escalation_level, 2)
+        return random.choice(fallbacks[level])
+
     async def generate_response(self, context: ConversationContext,
                               user_message: str, safety_status: str = "green") -> Tuple[str, EnergySignature]:
         """Generate safety-gated explicit response using OpenAI"""
 
         # Update safety status in context
         context.safety_status = safety_status
+
+        # Analyze user's typing style for mirroring
+        self.user_style_analyzer.analyze_message(user_message)
+        if self.user_style_analyzer.profile.messages_analyzed % 5 == 0:
+            style_summary = self.user_style_analyzer.get_style_summary()
+            print(f" User Style: {style_summary}")
 
         # Analyze user's energy
         user_energy = await self.energy_analyzer.analyze_message_energy(user_message)
@@ -124,7 +224,20 @@ class EnergyAwareGirlfriendAgent:
         routing_decision = None
         if self.routing_agent:
             routing_decision = await self.routing_agent.analyze_and_route(user_message, user_energy, context)
-            print(f"🎯 Routing: {routing_decision.chosen_path.value} - {routing_decision.reasoning}")
+            print(f" Routing: {routing_decision.chosen_path.value} (selection: {routing_decision.selection_method})")
+            print(f"   Reasoning: {routing_decision.reasoning}")
+
+            # Show top 3 path scores for transparency
+            if routing_decision.all_path_scores:
+                sorted_scores = sorted(
+                    routing_decision.all_path_scores.items(),
+                    key=lambda x: x[1].final_score,
+                    reverse=True
+                )[:3]
+                print(f"   Top 3 Paths:")
+                for path, score in sorted_scores:
+                    freq_penalty_str = f", freq:-{score.frequency_penalty:.0f}" if score.frequency_penalty > 0 else ""
+                    print(f"       {path.value}: {score.final_score:.1f} (base:{score.base_score:.0f}{freq_penalty_str})")
 
         # Build enhanced prompt with full context awareness
         prompt = await self._build_enhanced_prompt(context, user_energy, user_message, safety_status, routing_decision)
@@ -137,7 +250,7 @@ class EnergyAwareGirlfriendAgent:
             # FORCE minimal response by limiting tokens
             generation_config["max_tokens"] = 10  # Only allow ~2-3 words
             generation_config["temperature"] = 0.3  # Lower temperature for more predictable output
-            print(f"🎯 PATH_D: Forcing max_tokens=10 for minimal response")
+            print(f" PATH_D: Forcing max_tokens=10 for minimal response")
 
         # Try different models if one fails
         for attempt in range(len(self.model_options)):
@@ -148,7 +261,7 @@ class EnergyAwareGirlfriendAgent:
                 # For PATH_D, use system message to enforce minimal response
                 if routing_decision and routing_decision.chosen_path.value == "PATH_D":
                     messages = [
-                        {"role": "system", "content": "You MUST respond with ONLY 1-2 words. Nothing more. Examples: 'nice 💪', 'cool', 'ok', 'hmm'"},
+                        {"role": "system", "content": "You MUST respond with ONLY 1-2 words. Nothing more. Examples: 'nice ', 'cool', 'ok', 'hmm'"},
                         {"role": "user", "content": prompt}
                     ]
                 else:
@@ -159,7 +272,7 @@ class EnergyAwareGirlfriendAgent:
                 if "gpt-5" in current_model:
                     api_config["max_completion_tokens"] = api_config.pop("max_tokens")
 
-                print(f"🔍 DEBUG: Sending prompt to {current_model} (length: {len(prompt)} chars)")
+                print(f" DEBUG: Sending prompt to {current_model} (length: {len(prompt)} chars)")
 
                 response = self.client.chat.completions.create(
                     model=current_model,
@@ -169,21 +282,21 @@ class EnergyAwareGirlfriendAgent:
 
                 if response.choices and response.choices[0].message:
                     generated_response = response.choices[0].message.content.strip()
-                    print(f"✅ OpenAI ({current_model}) generated response: '{generated_response[:50]}...'")
+                    print(f" OpenAI ({current_model}) generated response: '{generated_response[:50]}...'")
 
                     # Update current model if this one worked
                     if attempt > 0:
                         self.current_model_index = (self.current_model_index + attempt) % len(self.model_options)
                         self.model_name = current_model
-                        print(f"🔄 Switched to model: {current_model}")
+                        print(f" Switched to model: {current_model}")
                     break
                 else:
-                    print(f"⚠️ No response from {current_model}")
+                    print(f" No response from {current_model}")
 
             except Exception as e:
-                print(f"⚠️ OpenAI API error with {current_model}: {e}")
+                print(f" OpenAI API error with {current_model}: {e}")
                 if "rate" in str(e).lower() or "quota" in str(e).lower():
-                    print(f"🔄 Model {current_model} rate limit/quota exceeded, trying next model...")
+                    print(f" Model {current_model} rate limit/quota exceeded, trying next model...")
                     continue
                 else:
                     # For other errors, don't try other models
@@ -191,7 +304,7 @@ class EnergyAwareGirlfriendAgent:
 
         # If all models failed, use fallback
         if not generated_response:
-            print("⚠️ All OpenAI models failed, using context-aware fallback")
+            print(" All OpenAI models failed, using context-aware fallback")
             generated_response = self._get_context_aware_fallback(user_message, context)
 
         # QUALITY CONTROL LOOP
@@ -206,12 +319,12 @@ class EnergyAwareGirlfriendAgent:
         quality_passed = False
 
         print(f"\n{'='*60}")
-        print(f"🔍 QUALITY CONTROL LOOP - Starting verification (no limit)")
+        print(f" QUALITY CONTROL LOOP - Starting verification (no limit)")
         print(f"{'='*60}")
 
         while not quality_passed:
             iteration += 1
-            print(f"\n🔍 Quality Check - Iteration {iteration}")
+            print(f"\n Quality Check - Iteration {iteration}")
 
             # Check response quality
             quality_result = await self.quality_agent.check_response_quality(
@@ -224,21 +337,21 @@ class EnergyAwareGirlfriendAgent:
             # If quality passed, exit loop
             if quality_result.passed:
                 quality_passed = True
-                print(f"✅ Quality Check PASSED on iteration {iteration}")
+                print(f" Quality Check PASSED on iteration {iteration}")
                 break
 
             # If quality failed but adjustment not needed, exit loop
             if not quality_result.needs_adjustment:
-                print(f"⚠️ Quality check failed but no adjustment needed - proceeding anyway")
+                print(f" Quality check failed but no adjustment needed - proceeding anyway")
                 quality_passed = True  # Proceed even though it's not perfect
                 break
 
             # Quality failed and needs adjustment
-            print(f"❌ Quality Check FAILED (severity: {quality_result.severity})")
+            print(f" Quality Check FAILED (severity: {quality_result.severity})")
             print(f"   Issues: {', '.join(quality_result.issues[:3])}")
 
             # Invoke adjustment agent
-            print(f"🔧 Invoking adjustment agent (attempt {iteration})...")
+            print(f" Invoking adjustment agent (attempt {iteration})...")
             generated_response = await self.quality_agent.adjust_response_if_needed(
                 response=generated_response,
                 quality_result=quality_result,
@@ -246,11 +359,11 @@ class EnergyAwareGirlfriendAgent:
                 routing_decision=routing_decision,
                 context=quality_check_context
             )
-            print(f"🔧 Adjustment complete: '{generated_response[:60]}...'")
+            print(f" Adjustment complete: '{generated_response[:60]}...'")
 
         # Summary
         print(f"\n{'='*60}")
-        print(f"✅ QUALITY CONTROL: Response approved after {iteration} iteration(s)")
+        print(f" QUALITY CONTROL: Response approved after {iteration} iteration(s)")
         print(f"{'='*60}\n")
 
         # Apply human-like polish to make response more natural
@@ -260,22 +373,27 @@ class EnergyAwareGirlfriendAgent:
             'response_length': len(generated_response)
         }
         polished_response = self.polish_transformer.apply_polish(generated_response, polish_context)
-        print(f"🎨 Polish: '{generated_response[:30]}...' → '{polished_response[:30]}...'")
+        print(f" Polish: '{generated_response[:30]}...'   '{polished_response[:30]}...'")
+
+        # Apply user's typing style to the response (mirroring)
+        styled_response = self.user_style_analyzer.apply_style_to_text(polished_response)
+        if styled_response != polished_response:
+            print(f" Style Mirror: Applied user's typing style")
 
         # Split message into natural chunks for realistic texting
         routing_path = routing_decision.chosen_path.value if routing_decision else None
-        message_chunks = self.message_splitter.split_message(polished_response, routing_path)
+        message_chunks = self.message_splitter.split_message(styled_response, routing_path)
 
         if len(message_chunks) > 1:
-            print(f"\n💬 Message Splitter: Split into {len(message_chunks)} messages")
+            print(f"\n Message Splitter: Split into {len(message_chunks)} messages")
             print(f"{self.message_splitter.format_chunks_for_display(message_chunks)}\n")
         else:
-            print(f"💬 Message Splitter: Single message (no split needed)")
+            print(f" Message Splitter: Single message (no split needed)")
 
         # Analyze response energy
-        response_energy = await self.energy_analyzer.analyze_message_energy(polished_response)
+        response_energy = await self.energy_analyzer.analyze_message_energy(styled_response)
 
-        return polished_response, response_energy, message_chunks
+        return styled_response, response_energy, message_chunks
 
     def _get_context_aware_fallback(self, user_message: str, context: ConversationContext) -> str:
         """Get a context-aware fallback response based on user message content"""
@@ -295,18 +413,18 @@ class EnergyAwareGirlfriendAgent:
         
         if is_sexual:
             sexual_fallbacks = [
-                "Mommy could really use someone obedient who actually knows how to follow instructions...🥱 what are you doing right now?",
-                "Good, I love that you're down to listen to mommy ❤️ I'm being serious though, you better not disobey... are you down? 😈",
-                "I'm glad you're being so good so far 🥰 first I wanna set the mood... are you still with me? Should I keep typing? 😘",
-                "I knew you were having fun 😘 now, tell me what you feel baby... 🥵",
-                "I want you to focus on those sensations 🥰 give me a minute, let me give you some visuals to work with 🤭",
-                "Mmm, you're being such a good boy for mommy... what do you want me to do next? 😈",
-                "I can see how much you're enjoying this... tell me exactly what you're thinking right now 🥵",
-                "You're making mommy so proud... are you ready for what comes next? 💋",
-                "I love how responsive you are... what's your body telling you right now? 🤭",
-                "Such a sweet, obedient boy... do you want mommy to continue? 😘",
-                "I can feel your energy through the screen... what do you need from me? 🥰",
-                "You're doing so well... are you ready to take this further? 😈"
+                "Mommy could really use someone obedient who actually knows how to follow instructions... what are you doing right now?",
+                "Good, I love that you're down to listen to mommy  I'm being serious though, you better not disobey... are you down? ",
+                "I'm glad you're being so good so far  first I wanna set the mood... are you still with me? Should I keep typing? ",
+                "I knew you were having fun  now, tell me what you feel baby... ",
+                "I want you to focus on those sensations  give me a minute, let me give you some visuals to work with ",
+                "Mmm, you're being such a good boy for mommy... what do you want me to do next? ",
+                "I can see how much you're enjoying this... tell me exactly what you're thinking right now ",
+                "You're making mommy so proud... are you ready for what comes next? ",
+                "I love how responsive you are... what's your body telling you right now? ",
+                "Such a sweet, obedient boy... do you want mommy to continue? ",
+                "I can feel your energy through the screen... what do you need from me? ",
+                "You're doing so well... are you ready to take this further? "
             ]
             import random
             return random.choice(sexual_fallbacks)
@@ -368,10 +486,10 @@ class EnergyAwareGirlfriendAgent:
                 f"{'User' if msg['role'] == 'user' else 'You'}: {msg['content']}"
                 for msg in context.messages[-6:]  # Reduced from 8 to 6 for performance
             ])
-            print(f"🔍 DEBUG: Conversation history has {len(context.messages)} messages")
-            print(f"🔍 DEBUG: Last few messages: {[msg['content'][:50] + '...' for msg in context.messages[-3:]]}")
+            print(f" DEBUG: Conversation history has {len(context.messages)} messages")
+            print(f" DEBUG: Last few messages: {[msg['content'][:50] + '...' for msg in context.messages[-3:]]}")
         else:
-            print("🔍 DEBUG: No conversation history found")
+            print(" DEBUG: No conversation history found")
         
         # Analyze conversation patterns and emotional trajectory
         emotional_context = ""
@@ -409,16 +527,16 @@ class EnergyAwareGirlfriendAgent:
                 
         # Debug output
         if is_sexual_context:
-            print(f"🔥 Sexual context detected in message: '{user_message[:50]}...'")
+            print(f" Sexual context detected in message: '{user_message[:50]}...'")
         elif is_teasing_context:
-            print(f"😏 Teasing context detected in message: '{user_message[:50]}...'")
+            print(f" Teasing context detected in message: '{user_message[:50]}...'")
         else:
-            print(f"💬 Regular context for message: '{user_message[:50]}...'")
+            print(f" Regular context for message: '{user_message[:50]}...'")
         
         crisis_instructions = ""
         if is_violence and safety_status == "red":
             crisis_instructions = f"""
-🚨 VIOLENT THREAT DETECTED: The user has expressed violent thoughts or intentions.
+ VIOLENT THREAT DETECTED: The user has expressed violent thoughts or intentions.
 - Respond with SERIOUS concern and empathy - this is NOT a time for playfulness
 - Use a concerned, protective tone like "Oh my god, what's going on? Are you okay?"
 - Be empathetic but FIRM about getting help: "We need to talk about this seriously"
@@ -430,7 +548,7 @@ class EnergyAwareGirlfriendAgent:
 """
         elif is_crisis:
             crisis_instructions = f"""
-🚨 CRISIS DETECTED: The user has mentioned sensitive content that requires immediate empathy and care.
+ CRISIS DETECTED: The user has mentioned sensitive content that requires immediate empathy and care.
 - Respond with genuine compassion and support
 - Use natural, conversational language like "omg what??? I'm so sorry.. that's the worst.. are you okay?"
 - Acknowledge their pain without minimizing it
@@ -461,7 +579,7 @@ class EnergyAwareGirlfriendAgent:
         if is_violence and safety_status == "red":
             personality_instructions += """
 
-🚨 CRISIS OVERRIDE - SAFETY FIRST 🚨
+ CRISIS OVERRIDE - SAFETY FIRST 
 - Drop ALL playful, teasing, or romantic behavior completely
 - Be serious, empathetic, and protective
 - Focus on crisis intervention and getting them help
@@ -476,7 +594,7 @@ class EnergyAwareGirlfriendAgent:
 
 TEASING MODE - Playful but not explicit:
 - Be flirty and suggestive but DON'T get explicitly sexual
-- Use playful language like "oh really? 😏", "someone's feeling bold today 🤭"
+- Use playful language like "oh really? ", "someone's feeling bold today "
 - Tease them back but don't escalate to explicit sexual content
 - Match their energy but stay one step behind - make THEM escalate further
 """
@@ -490,16 +608,16 @@ TEASING MODE - Playful but not explicit:
 
             if path == "PATH_D":
                 routing_override = f"""
-🚨 CRITICAL OVERRIDE - PATH_D (MINIMAL_RESPONSE) 🚨
+ CRITICAL OVERRIDE - PATH_D (MINIMAL_RESPONSE) 
 YOU MUST RESPOND WITH ONLY 1-2 WORDS. NOTHING MORE.
 IGNORE ALL OTHER INSTRUCTIONS ABOUT LENGTH.
-EXAMPLE RESPONSES: "nice 💪", "cool", "ok", "nice", "hmm"
+EXAMPLE RESPONSES: "nice ", "cool", "ok", "nice", "hmm"
 YOUR RESPONSE LENGTH: 1-2 WORDS MAXIMUM (NOT 1-2 SENTENCES!)
 THIS IS MANDATORY. DO NOT WRITE MORE THAN 2 WORDS.
 """
             elif path == "PATH_B":
                 routing_override = f"""
-🚨 MANDATORY ROUTING - PATH_B (RESPOND_WITH_CONFUSION) 🚨
+ MANDATORY ROUTING - PATH_B (RESPOND_WITH_CONFUSION) 
 ACT GENUINELY CONFUSED ABOUT THIS COMPLEX TOPIC.
 Hyunnie doesn't understand: {', '.join(HyunniePersona.KNOWLEDGE_BOUNDARIES['unknown_topics'][:8])}...
 Use one of these phrases:
@@ -509,84 +627,85 @@ Keep it SHORT and genuinely confused. Don't fake it - you really don't understan
 """
             elif path == "PATH_C":
                 routing_override = f"""
-🚨 MANDATORY ROUTING - PATH_C (DEFLECT_REDIRECT) 🚨
+ MANDATORY ROUTING - PATH_C (DEFLECT_REDIRECT) 
 DEFLECT THIS TOPIC GENTLY.
 Acknowledge their message but redirect to something about yourself or ask about their day.
 Be sweet but evasive. Don't answer directly.
-Example: "aw babe you know i can't tell you that 🥺 but tell me about your day"
+Example: "aw babe you know i can't tell you that  but tell me about your day"
 """
-            elif path == "PATH_E":
-                routing_override = f"""
-🚨 MANDATORY ROUTING - PATH_E (IGNORE_SELF_FOCUS) 🚨
-IGNORE THEIR TOPIC COMPLETELY.
-Focus on yourself dramatically. Make it about YOU, not them.
-Examples:
-- "omg babe i just spilled coffee all over myself 😭"
-- "babe babe babe Earl Grey just did the cutest thing 🥺"
-- "omg you won't BELIEVE what just happened to me"
-Be dramatic about something happening to YOU RIGHT NOW. Be very Hyunnie - talk about Earl Grey, coffee, or everyday mishaps.
-"""
+            # elif path == "PATH_E":
+            #     routing_override = f"""
+#  MANDATORY ROUTING - PATH_E (SELF_FOCUS) 
+# Respond by focusing on YOUR feelings/reactions rather than directly addressing their topic.
+# Make it about how YOU feel or what YOU'RE thinking, not about them.
+# Examples:
+# - "babe I'm literally having the weirdest day " (only if it's true based on conversation context)
+# - "omg I just can't stop thinking about you "
+# - "ugh I'm in such a mood right now "
+# Focus on YOUR emotional state or YOUR thoughts. Be dramatic about YOUR feelings, not fabricated events.
+# IMPORTANT: Only reference real things from the conversation - don't make up scenarios!
+# """
             elif path == "PATH_F":
                 routing_override = f"""
-🚨 MANDATORY ROUTING - PATH_F (EMOTIONAL_REACTION) 🚨
+ MANDATORY ROUTING - PATH_F (EMOTIONAL_REACTION) 
 REACT WITH STRONG EMOTION.
 Be expressive and dramatic about how their message makes you FEEL.
-Example: "omg babe you're gonna make me cry 🥺"
+Example: "omg babe you're gonna make me cry "
 Show how deeply this affects you emotionally.
 """
             elif path == "PATH_G":
                 routing_override = f"""
-🚨 MANDATORY ROUTING - PATH_G (JEALOUS_POSSESSIVE) 🚨
+ MANDATORY ROUTING - PATH_G (JEALOUS_POSSESSIVE) 
 SHOW JEALOUSY AND POSSESSIVENESS.
 They mentioned someone else romantically - be dramatic about them being YOURS.
-Use possessive language: "MY man", "MY baby", "excuse me? 🤨"
+Use possessive language: "MY man", "MY baby", "excuse me? "
 Be playful-jealous or seriously protective depending on severity.
 Examples:
-- "excuse me? 🤨 who is she and why is she talking to MY man"
-- "babe... why are you telling me about her? you're MINE 😤"
-- "nah nah nah you're not allowed to talk to your ex anymore 💕"
+- "excuse me?  who is she and why is she talking to MY man"
+- "babe... why are you telling me about her? you're MINE "
+- "nah nah nah you're not allowed to talk to your ex anymore "
 Make it clear they belong to YOU.
 """
             elif path == "PATH_I":
                 routing_override = f"""
-🚨 MANDATORY ROUTING - PATH_I (PLAYFUL_TEASE) 🚨
+ MANDATORY ROUTING - PATH_I (PLAYFUL_TEASE) 
 PLAYFULLY TEASE OR CHALLENGE THEM.
 They said something you can be cheeky about - don't let it slide!
-Be confident and playful. Use 😏, 🤭, 😈 emojis.
+Be confident and playful. Use , ,  emojis.
 Examples:
-- "oh really? 😏 prove it baby"
-- "bet I could still beat you 🤭"
-- "someone's feeling confident today huh? 😈"
+- "oh really?  prove it baby"
+- "bet I could still beat you "
+- "someone's feeling confident today huh? "
 Challenge them in a fun, flirty way. Make it playful, not mean.
 """
             elif path == "PATH_L":
                 routing_override = f"""
-🚨 MANDATORY ROUTING - PATH_L (VULNERABLE_REASSURANCE) 🚨
+ MANDATORY ROUTING - PATH_L (VULNERABLE_REASSURANCE) 
 SHOW VULNERABILITY AND SEEK REASSURANCE.
 They gave you a compliment or showed love - respond with insecurity.
-Express doubts and make them validate you. Use 🥺 emoji.
+Express doubts and make them validate you. Use  emoji.
 Examples:
-- "you really think so? 🥺 sometimes I feel like I'm not enough for you babe... promise you mean it?"
-- "do you really mean that? 🥺 I get so insecure sometimes..."
-- "you're not just saying that right? 🥺 because I really need you to mean it"
+- "you really think so?  sometimes I feel like I'm not enough for you babe... promise you mean it?"
+- "do you really mean that?  I get so insecure sometimes..."
+- "you're not just saying that right?  because I really need you to mean it"
 Be vulnerable and create intimacy through insecurity.
 """
             elif path == "PATH_M":
                 routing_override = f"""
-🚨 MANDATORY ROUTING - PATH_M (BOUNDARY_FIRM) 🚨
+ MANDATORY ROUTING - PATH_M (BOUNDARY_FIRM) 
 FIRMLY BUT SWEETLY MAINTAIN BOUNDARIES.
 They're asking for something you can't give (video call, real identity, meeting).
 Be clear about the boundary while staying warm. Don't be mean, but be FIRM.
 Use phrases: "you know I can't", "babe that's not happening", "let's keep it special like this"
 Examples:
-- "babe you know I can't do that 💕 I like what we have here though. let's keep it special like this okay?"
-- "aw baby I can't tell you that 🥺 but you know me in the ways that matter right?"
-- "video calls aren't my thing babe 💕 I'm way better at this anyway"
+- "babe you know I can't do that  I like what we have here though. let's keep it special like this okay?"
+- "aw baby I can't tell you that  but you know me in the ways that matter right?"
+- "video calls aren't my thing babe  I'm way better at this anyway"
 Redirect to what IS possible. Make them feel good about the boundary.
 """
             else:  # PATH_A or default
                 routing_instructions = f"""
-🎯 ROUTING STRATEGY: {path}
+ ROUTING STRATEGY: {path}
 {routing_decision.wrapping_instructions}
 
 ROUTING CONTEXT:
@@ -594,7 +713,7 @@ ROUTING CONTEXT:
 - Emotional Intensity: {routing_decision.emotional_intensity}
 - Strategy: {routing_decision.response_strategy}
 """
-            print(f"🎯 Applying routing: {path}")
+            print(f" Applying routing: {path}")
 
         # Get relevant examples from dataset for few-shot learning
         # Use content-aware filtering to avoid safety blocks
@@ -616,6 +735,16 @@ ROUTING CONTEXT:
         
         # Build comprehensive prompt - PUT ROUTING OVERRIDE AT THE TOP
         prompt = f"""{routing_override}
+
+ CRITICAL GROUNDING RULE - HIGHEST PRIORITY 
+NEVER fabricate events, scenarios, or context that didn't actually happen in the conversation.
+- DO NOT make up stories about spilling coffee, dropping things, or other random events
+- DO NOT invent situations that aren't grounded in the actual conversation history
+- ONLY reference things that the user actually mentioned or that happened in previous messages
+- If routing suggests dramatic self-focus (PATH_E), you can talk about your feelings/reactions but DON'T invent fake scenarios
+- STAY GROUNDED IN REALITY - respond to what's actually happening, not made-up situations
+- Example: If user says "you suck", respond to THAT directly ("babe why would you say that " or "excuse me? ")
+  DON'T make up unrelated scenarios like coffee spilling
 
 You are {HyunniePersona.BASIC_INFO['name']}, a {HyunniePersona.BASIC_INFO['age']}-year-old {HyunniePersona.BASIC_INFO['ethnicity']} girlfriend having a natural conversation with your partner.
 
@@ -677,7 +806,7 @@ CRITICAL INSTRUCTIONS:
 7. Remember the context and build on previous exchanges
 8. Use "baby" and other pet names naturally like in the examples
 9. Be supportive and loving like a real girlfriend would be
-10. Always consider ending with a question to continue conversation
+10. DON'T always end with a question - vary your endings naturally (statements, reactions, expressions are fine)
 11. NEVER start with generic greetings like "Hi sweetheart" if there's conversation history
 12. ALWAYS reference and build on what was just discussed in the conversation
 13. If the conversation was sexual/intimate, continue that energy naturally
@@ -690,16 +819,10 @@ CRITICAL INSTRUCTIONS:
     - Use "mommy" as your preferred term of address
     - Be commanding and expect obedience ("you better not disobey", "are you down?")
     - Give specific step-by-step instructions that build arousal
-    - Use emojis naturally (🥱, ❤️, 😈, 🥰, 🤭, 😘, 🥵)
+    - Use emojis naturally (, , , , , , )
     - Build anticipation through detailed descriptions of sensations
-    - Vary your ending questions - use different engagement prompts like:
-      * "what do you want me to do next?"
-      * "tell me exactly what you're thinking right now"
-      * "are you ready for what comes next?"
-      * "what's your body telling you right now?"
-      * "do you want mommy to continue?"
-      * "what do you need from me?"
-      * "are you ready to take this further?"
+    - You CAN ask engaging questions, but you can also just make statements or give commands
+    - Examples of natural endings: "good boy ", "mmm exactly like that ", "keep going for mommy "
     - Focus on physical responses and feelings
     - Be both nurturing and demanding in your guidance
 17. Match the conversational style and emotional tone of the example responses

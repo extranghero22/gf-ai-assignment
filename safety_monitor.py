@@ -24,7 +24,6 @@ class LLMSafetyMonitor:
 
         # Model options for fallback
         self.model_options = [
-            "gpt-5-nano",
             "gpt-4o-mini",
             "gpt-4o",
             "gpt-3.5-turbo"
@@ -77,17 +76,16 @@ Respond with JSON:
                 current_model = self.model_options[self.current_model_index]
                 print(f"DEBUG: Calling OpenAI ({current_model}) for safety analysis...")
 
-                # GPT-5 nano only supports default temperature=1
                 response = self.client.chat.completions.create(
                     model=current_model,
                     messages=[{"role": "user", "content": prompt}],
-                    # temperature=0.2  # Commented out for GPT-5 nano compatibility
+                    temperature=0.2
                 )
 
                 response_text = response.choices[0].message.content.strip()
 
                 if not response_text:
-                    print("⚠️ Empty safety response, using fallback")
+                    print(" Empty safety response, using fallback")
                     return self._get_safety_fallback()
 
                 # Try to extract JSON
@@ -99,7 +97,7 @@ Respond with JSON:
                     if json_match:
                         result = json.loads(json_match.group())
                     else:
-                        print(f"⚠️ No valid JSON in safety response: '{response_text}'")
+                        print(f" No valid JSON in safety response: '{response_text}'")
                         return self._get_safety_fallback()
 
                 # Add debug logging for the parsed result

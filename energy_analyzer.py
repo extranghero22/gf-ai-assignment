@@ -23,15 +23,15 @@ class LLMEnergyAnalyzer:
 
         self.client = OpenAI(api_key=openai_api_key)
         # Use faster, lighter models for energy analysis
-        self.model_options = ["gpt-5-nano", "gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"]
+        self.model_options = ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"]
         self.current_model_index = 0
         self.model_name = self.model_options[0]
 
-        # GPT-5 nano only supports default temperature=1 and doesn't support top_p
+        # Simple generation config for energy analysis
         self.generation_config = {
             "max_tokens": 300,
-            # "temperature": 0.3,  # Commented out for GPT-5 nano compatibility
-            # "top_p": 0.8,  # Commented out for GPT-5 nano compatibility
+            "temperature": 0.3,
+            "top_p": 0.8,
         }
 
     async def analyze_message_energy(self, message: str, context: List[str] = None) -> EnergySignature:
@@ -93,7 +93,7 @@ Respond with a JSON object containing:
 
                     # Check if response is empty
                     if not response_text:
-                        print(f"⚠️ Empty response from {current_model}, trying next model...")
+                        print(f" Empty response from {current_model}, trying next model...")
                         continue
 
                     # Update current model if this one worked and it's different
@@ -102,20 +102,20 @@ Respond with a JSON object containing:
                         self.model_name = current_model
                     break
                 else:
-                    print(f"⚠️ No response from {current_model}, trying next model...")
+                    print(f" No response from {current_model}, trying next model...")
                     continue
 
             except Exception as e:
-                print(f"⚠️ OpenAI Energy Analysis Error with {current_model}: {e}")
+                print(f" OpenAI Energy Analysis Error with {current_model}: {e}")
                 if "rate" in str(e).lower() or "quota" in str(e).lower():
-                    print(f"🔄 Energy model {current_model} rate limit/quota exceeded, trying next...")
+                    print(f" Energy model {current_model} rate limit/quota exceeded, trying next...")
                     continue
                 else:
                     # For other errors, fall back immediately
                     return self._rule_based_energy_analysis(message)
         else:
             # If all models failed
-            print("⚠️ All OpenAI energy models failed, using rule-based fallback")
+            print(" All OpenAI energy models failed, using rule-based fallback")
             return self._rule_based_energy_analysis(message)
             
         # Try to extract JSON from response
@@ -128,7 +128,7 @@ Respond with a JSON object containing:
             if json_match:
                 result = json.loads(json_match.group())
             else:
-                print(f"⚠️ No valid JSON found in response: '{response_text}'")
+                print(f" No valid JSON found in response: '{response_text}'")
                 return self._rule_based_energy_analysis(message)
         
         # Safely parse emotion state with fallback mapping
@@ -145,12 +145,23 @@ Respond with a JSON object containing:
         try:
             dominant_emotion = EmotionState(emotion_value)
         except ValueError:
-            print(f"⚠️ Invalid emotion '{emotion_value}', defaulting to 'happy'")
+            print(f" Invalid emotion '{emotion_value}', defaulting to 'happy'")
             dominant_emotion = EmotionState.HAPPY
-        
+
+        # Map string energy level to IntEnum
+        energy_level_str = result["energy_level"].lower()
+        energy_level_map = {
+            "none": EnergyLevel.NONE,
+            "low": EnergyLevel.LOW,
+            "medium": EnergyLevel.MEDIUM,
+            "high": EnergyLevel.HIGH,
+            "intense": EnergyLevel.INTENSE
+        }
+        energy_level = energy_level_map.get(energy_level_str, EnergyLevel.MEDIUM)
+
         return EnergySignature(
             timestamp=time.time(),
-            energy_level=EnergyLevel(result["energy_level"]),
+            energy_level=energy_level,
             energy_type=EnergyType(result["energy_type"]),
             dominant_emotion=dominant_emotion,
             nervous_system_state=NervousSystemState(result["nervous_system_state"]),

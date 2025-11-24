@@ -1,7 +1,7 @@
 // Main App component
 import React, { useState, useRef, useEffect } from 'react';
 import { Message, EnergyFlags, ApiResponse } from './types';
-import { conversationApi, StreamMessagePart, StreamComplete, StreamError } from './services/api';
+import { conversationApi, StreamMessagePart, StreamComplete, StreamError, GhostMessage } from './services/api';
 import ChatMessage from './components/ChatMessage';
 import ChatInput from './components/ChatInput';
 import EnergyIndicator from './components/EnergyIndicator';
@@ -41,11 +41,11 @@ const App: React.FC = () => {
   useEffect(() => {
     if (pendingMessages.length > 0) {
       let currentIndex = 0;
-      
+
       const showNextMessage = () => {
         if (currentIndex < pendingMessages.length) {
           const message = pendingMessages[currentIndex];
-          
+
           // Add the message to the chat
           const newMessage: Message = {
             role: 'agent',
@@ -53,9 +53,9 @@ const App: React.FC = () => {
             timestamp: Date.now() / 1000,
           };
           setMessages(prev => [...prev, newMessage]);
-          
+
           currentIndex++;
-          
+
           // If there are more messages, continue typing
           if (currentIndex < pendingMessages.length) {
             setTimeout(showNextMessage, 1500 + Math.random() * 1000); // 1.5-2.5 second delay
@@ -70,6 +70,37 @@ const App: React.FC = () => {
       setTimeout(showNextMessage, 800 + Math.random() * 700); // 0.8-1.5 second initial delay
     }
   }, [pendingMessages.length]); // Only depend on length, not the array itself
+
+  // Effect to poll for ghost messages (auto-messages when user is inactive)
+  useEffect(() => {
+    if (!isActive || isStreaming || isTyping) {
+      return; // Don't poll if session not active or currently streaming/typing
+    }
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const response = await conversationApi.pollMessages();
+
+        if (response.messages && response.messages.length > 0) {
+          // Add ghost messages to the chat
+          response.messages.forEach((ghostMsg: GhostMessage) => {
+            const newMessage: Message = {
+              role: 'agent',
+              content: ghostMsg.content,
+              timestamp: ghostMsg.timestamp,
+            };
+            setMessages(prev => [...prev, newMessage]);
+            console.log('Ghost message received:', ghostMsg.content);
+          });
+        }
+      } catch (error) {
+        // Silently ignore poll errors to avoid spam
+        console.debug('Poll error:', error);
+      }
+    }, 5000); // Poll every 5 seconds
+
+    return () => clearInterval(pollInterval);
+  }, [isActive, isStreaming, isTyping]);
 
   const startConversation = async () => {
     try {

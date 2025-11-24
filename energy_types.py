@@ -3,14 +3,15 @@ Energy-related types and enums for the conversation system
 """
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import Enum, IntEnum
 
-class EnergyLevel(Enum):
-    NONE = "none"
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    INTENSE = "intense"
+class EnergyLevel(IntEnum):
+    """Energy levels with natural ordering for comparisons"""
+    NONE = 0
+    LOW = 1
+    MEDIUM = 2
+    HIGH = 3
+    INTENSE = 4
 
 class EnergyType(Enum):
     COMBATIVE = "combative"

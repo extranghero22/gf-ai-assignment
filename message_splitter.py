@@ -1,9 +1,10 @@
 """
 Intelligent message splitting agent for building anticipation
+With user style mirroring capabilities
 """
 
 import re
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 
 @dataclass
@@ -70,7 +71,75 @@ class MessageSplitter:
             r'[Aa]fter[^.]*\.',  # After... patterns
             r'[Bb]efore[^.]*\.',  # Before... patterns
         ]
-    
+
+        # User style analyzer for mirroring
+        self._user_style = None
+
+    def set_user_style(self, style_analyzer) -> None:
+        """Set the user style analyzer for style mirroring"""
+        self._user_style = style_analyzer
+
+    def apply_user_style(self, text: str) -> str:
+        """Apply user's typing style to the text"""
+        if not self._user_style or not text:
+            return text
+
+        profile = self._user_style.get_style_profile()
+
+        # Only apply style if we have enough data
+        if profile.messages_analyzed < 3:
+            return text
+
+        result = text
+
+        # Apply capitalization style
+        if profile.uses_all_lowercase:
+            result = result.lower()
+        # Note: We don't apply all-caps as it looks too aggressive from AI
+
+        # Apply punctuation style
+        if profile.uses_ellipsis:
+            # Add ellipsis to some sentences (replace single period)
+            sentences = result.split('. ')
+            if len(sentences) > 1:
+                # Add ellipsis to first sentence only
+                sentences[0] = sentences[0].rstrip('.') + '...'
+                result = '. '.join(sentences)
+
+        if profile.uses_multiple_punctuation:
+            # Intensify ending punctuation
+            if result.endswith('!'):
+                result = result[:-1] + '!!'
+            elif result.endswith('?'):
+                result = result[:-1] + '??'
+
+        return result
+
+    def get_target_message_length(self) -> int:
+        """Get target message length based on user's style"""
+        if not self._user_style:
+            return 150  # Default
+
+        profile = self._user_style.get_style_profile()
+        if profile.messages_analyzed < 3:
+            return 150  # Default
+
+        # Mirror user's length with some flexibility (AI can be 1.5x longer)
+        target = int(profile.avg_message_length * 1.5)
+        return max(30, min(target, 250))  # Clamp between 30 and 250
+
+    def should_split_for_user_style(self, message: str) -> bool:
+        """Check if message should be split based on user's preference for short messages"""
+        if not self._user_style:
+            return False
+
+        profile = self._user_style.get_style_profile()
+        if profile.messages_analyzed < 5:
+            return False
+
+        # If user prefers short messages, we should split longer ones
+        return profile.prefers_short_messages and len(message) > 60
+
     def split_message(self, message: str, context: str = "general") -> List[MessagePart]:
         """Intelligently split a message into sequential parts based on content type and context"""
         

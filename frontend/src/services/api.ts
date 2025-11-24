@@ -24,6 +24,28 @@ export interface StreamError {
 
 export type StreamEvent = StreamMessagePart | StreamComplete | StreamError;
 
+// Ghost message types
+export interface GhostMessage {
+  type: 'ghost_message';
+  content: string;
+  timestamp: number;
+  escalation_level: number;
+}
+
+export interface GhostStatus {
+  is_ghosting: boolean;
+  ghost_messages_sent: number;
+  seconds_since_user: number;
+  max_messages: number;
+  timeout_seconds: number;
+}
+
+export interface PollMessagesResponse {
+  messages: GhostMessage[];
+  ghost_status: GhostStatus | null;
+  timestamp: number;
+}
+
 const API_BASE_URL = 'http://localhost:5000/api';
 
 const api = axios.create({
@@ -167,6 +189,17 @@ export const conversationApi = {
       return response.data;
     } catch (error) {
       console.error('Error getting metrics:', error);
+      throw error;
+    }
+  },
+
+  // Poll for auto-generated messages (ghost messages)
+  pollMessages: async (): Promise<PollMessagesResponse> => {
+    try {
+      const response = await api.get('/poll-messages');
+      return response.data;
+    } catch (error) {
+      console.error('Error polling messages:', error);
       throw error;
     }
   },
